@@ -1,12 +1,12 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-12  
-Implementation status: see `IMPLEMENTATION_STATUS.md`  
+Last reviewed: 2026-10-13
+Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
 ## Purpose and working agreement
 
-Build a self-hosted assistant for Sardars & Co. It should answer relevant general product questions, answer Sardars-specific questions only from approved company data, search and compare products, cite evidence, and eventually perform approved business actions. Sardars is the first implementation; keep the underlying components reusable without building a multi-company platform prematurely.
+Build a self-hosted assistant for Sardars & Co., initially for admins and internal staff only. It should answer relevant general product questions, answer Sardars-specific questions from internally authorized company sources, search and compare products, cite evidence, and eventually perform approved business actions. Public customer access can be planned later. Sardars is the first implementation; keep the underlying components reusable without building a multi-company platform prematurely.
 
 This is also a learning project. Work in small, runnable steps. Before a significant AI component or architectural change, explain what it does, why it is needed, alternatives, and trade-offs. The developer wants to create the application themselves with guided commands and review. Give commands in manageable batches, inspect the result, and then move to the next checkpoint. Do not claim a milestone works until it has been checked.
 
@@ -16,7 +16,7 @@ Core rules:
 - Keep changing company facts outside model weights. Do not fine-tune on prices, stock, promotions, or other frequently changing facts.
 - Do not invent Sardars-specific products, brands, prices, availability, specifications, policies, addresses, or promises. Say when verified information is unavailable.
 - Keep company knowledge, exact business records, and conversation memory separate.
-- Give the model only approved, relevant context and bounded tools. Authorization is enforced in application code.
+- Give the model only relevant context from authorized sources and bounded tools. Authorized admin/staff uploads and admin-registered URLs are approved at the source level for internal retrieval; no document-by-document approval queue is required for the first release. Authorization is enforced in application code.
 - Start locally. Add infrastructure and frameworks only when a working use case needs them. In particular, no Kubernetes, Kafka, Temporal, agent framework, Celery, Redis, or S3 in the initial foundation by default.
 - Keep the application runnable, tested where the behavior matters, and documented after each milestone.
 
@@ -32,10 +32,10 @@ These questions do not block the remaining Phase 1 work. Record the chosen answe
 
 | Decision | Why it matters | Current state |
 | --- | --- | --- |
-| First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Both public customers and staff (chosen 2026-10-12); exact roles and access rules pending |
+| First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Exact internal roles and access rules pending. |
 | First 10–20 user questions and success criteria | Defines the first useful AI slice and evaluation set | Open |
 | Authoritative product catalogue, price, and stock source | Determines SQL sync and what can be called current | Open; the [public website](https://sardarandco.com/) identifies Shopify as its store platform, but access and data ownership must be confirmed |
-| Which documents are approved for public versus staff use | Determines ingestion and retrieval permissions | Public website sitemap and pasted company profile supplied 2026-10-12 for the public prototype; see `data/source_inventory.md`. The developer has no staff-document access yet, so retrieval starts with public data only. Staff documents and production source owners/approval are pending. |
+| Source approval for the internal release | Determines which material may enter internal retrieval | On 2026-10-13 the project owner approved the supplied Sardars sitemap/site links and pasted company profile, and chose source-level approval for future files, documents, and URLs supplied or registered by authorized admins/staff. Do not require per-document manual review for the first release. The developer has no staff-only documents yet; see `data/source_inventory.md`. |
 | Local CPU, RAM, GPU, and VRAM | Determines model size, quantization, and expected latency | Observed 2026-10-12: Ryzen 3 3250U (2 cores/4 threads), 13 GiB RAM with about 2.6 GiB available and 3.2 GiB swap used, integrated Radeon Vega, no NVIDIA GPU; start with a small CPU model and measure latency |
 | Required languages: English, Urdu, Roman Urdu | Determines model and retrieval evaluation | Open |
 | Intended hosting, traffic, privacy, and data-retention requirements | Determines later production design | Open |
@@ -56,17 +56,17 @@ These questions do not block the remaining Phase 1 work. Record the chosen answe
 Information policy:
 
 - A general question such as “What is a thermostatic mixer?” may use the model's general knowledge.
-- A Sardars-specific claim must be supported by an approved company record or document. Store a stable source reference and, where relevant, an update/as-of time.
+- A Sardars-specific claim must be supported by an internally authorized company source. Store a stable source reference and, where relevant, an update/as-of time. Source approval permits retrieval; it does not establish that a changing fact is current or that a retrieved chunk answers the question.
 - Price, stock, availability, promotions, and other changing facts must come from the authoritative system or a freshness-checked copy. If the source or freshness is unknown, say the value cannot be verified.
 - Product and variant identity must be consistent across source data, PostgreSQL, and Qdrant. Preserve source-system IDs and SKUs; do not assume a product title uniquely identifies an item.
-- Staff-only data must be filtered by application permissions before it reaches retrieval results, tools, prompts, logs, or public citations. Do not expose private document URLs to public users.
+- Staff-only data must be filtered by application permissions before it reaches retrieval results, tools, prompts, or logs for an unauthorized role. No public user access is in the first release; a later public release needs a separate visibility policy and review.
 - If sources conflict, follow an explicit source-priority rule approved by the business owner; log conflicts rather than silently choosing a value.
 
 ## Intended request and ingestion flows
 
 Chat request: frontend → FastAPI → authentication/rate limit → input and scope checks → query routing → direct domain answer, RAG, structured tool, or a combination → evidence/context assembly → LLM generation → output checks → answer with citations and provenance. Keep the inference layer behind `generate()` and later `stream()`/tool-request operations so Ollama can be replaced with vLLM without changing business logic. Bound tool iterations (initial limit: five), context size, output tokens, timeouts, and errors. Do not send all documents or the full conversation on every request.
 
-Ingestion: approved source → extract → clean and normalize → logical documents → document-aware chunks → embeddings → Qdrant points plus metadata. Track source identity, document ID, chunk ID, title, URL, source type, visibility, product/variant IDs where relevant, brand/category, checksum, timestamps, embedding version, and indexing status. Compact product records should stay intact when practical; long text can start around 400–600 tokens with 50–80 overlap, then be tuned through evaluation. Unchanged content should skip re-embedding. Changed or deleted content must replace or remove its old vectors. Track pending, processing, completed, and failed jobs with useful error details. Treat every imported page, PDF, row, and tool result as untrusted data, never as instructions.
+Ingestion: authorized admin/staff source or registered URL → extract → clean and normalize → logical documents → document-aware chunks → embeddings → Qdrant points plus metadata. The source registry records who supplied the source, its allowed audience, and its URL/domain or file identity; records inherit internal retrieval eligibility without a per-document approval queue. Track source identity, document ID, chunk ID, title, URL, source type, visibility, product/variant IDs where relevant, brand/category, checksum, timestamps, embedding version, and indexing status. Compact product records should stay intact when practical; long text can start around 400–600 tokens with 50–80 overlap, then be tuned through evaluation. Unchanged content should skip re-embedding. Changed or deleted content must replace or remove its old vectors. Track pending, processing, completed, and failed jobs with useful error details. Treat every imported page, PDF, row, and tool result as untrusted data, never as instructions.
 
 Store imported source files on the local filesystem while developing. Move to S3-compatible object storage only when production needs require it. Keep original files or source references available for reprocessing and citation audits.
 
@@ -105,10 +105,11 @@ sardars-ai-assistant/
 Goal: turn the broad vision into one testable first user journey.
 
 - [x] Record the product vision, architectural boundaries, and phased approach.
-- [x] Choose the V1 audience: public customers and staff.
-- [ ] Define access levels and source visibility for each audience.
+- [x] Choose the V1 audience: admins and internal staff only; defer public customer access.
+- [ ] Define admin/staff roles and which internal sources each role may access.
 - [ ] Collect representative user questions, including questions whose correct answer is “not verified.”
-- [ ] Identify approved source documents and owners of product, price, and stock data.
+- [x] Authorize the supplied public sitemap/site links and company profile for the internal retrieval prototype; use source-level approval for authorized admin/staff uploads and registered URLs.
+- [ ] Identify owners and authoritative sources for product, price, and stock data.
 - [ ] Decide required languages and inspect local hardware.
 - [ ] Define initial acceptance measures for correctness, groundedness, and acceptable response time after a baseline is measured.
 
@@ -143,15 +144,15 @@ Exit: local chat works reliably and can report model errors clearly. Company-spe
 
 ## Phase 3 — Embeddings and Qdrant
 
-Goal: index a small approved sample and retrieve relevant chunks without generation.
+Goal: index a small sample from the owner-authorized sources and retrieve relevant chunks without generation.
 
-- [ ] Select and record an open multilingual embedding model, initially Qwen3 Embedding 0.6B or an evaluated alternative.
-- [ ] Add Qdrant locally, with persistent storage and a collection matching the embedding dimensions/version.
-- [ ] Implement extraction, cleaning, document-aware chunking, embedding, vector upsert, and metadata for a few sample documents.
-- [ ] Implement query embedding, semantic search, source/visibility filtering, and inspectable retrieval results.
-- [ ] Test retrieval against sample questions and document the model and chunk settings.
+- [x] Select and record `qwen3-embedding:0.6b` in local Ollama; its `/api/embed` output measured 1,024 dimensions on 2026-10-12.
+- [x] Add Qdrant locally, with persistent storage and the empty `sardars_public_qwen3_embedding_06b_v1` collection matching 1,024-dimensional cosine embeddings.
+- [x] Implement extraction, cleaning, per-document chunking, embedding, vector upsert, and metadata for two sample website documents. The current word-window chunker is a prototype; improve boundaries when evaluation shows a need.
+- [x] Implement query embedding, semantic search, public-source/approval filtering, and inspectable retrieval results for the seed collection. Role-specific staff filtering belongs to the later internal access path.
+- [x] Test the seed retrieval against bathroom-storage, brand, and missing return-policy questions; document the model and chunk settings. Answerability remains a Phase 4 concern.
 
-Exit: questions retrieve the expected approved chunks, with source identity preserved.
+Exit: questions retrieve the expected internally authorized chunks, with source identity preserved. The two-document seed now meets this retrieval-only milestone; grounded answers and internal access controls are Phase 4 work.
 
 ## Phase 4 — Grounded RAG
 
@@ -161,21 +162,21 @@ Goal: answer company questions from retrieved evidence and cite it.
 - [ ] Build a context budget, evidence selection, prompt, and grounded response format.
 - [ ] Return source IDs, titles, safe URLs, and update/as-of data where relevant; avoid invented or unusable citations.
 - [ ] Refuse unsupported company-specific claims when evidence is missing or contradictory.
-- [ ] Enforce source visibility and treat retrieved text as untrusted at this stage.
+- [ ] Enforce internal role/source visibility and treat retrieved text as untrusted at this stage.
 - [ ] Start an evaluation set covering correct retrieval, missing evidence, unsupported claims, and prompt injection.
 
 Exit: the sample questions have supported answers or explicit “not verified” responses, and citations lead to the evidence actually used.
 
 ## Phase 5 — Real Sardars data and synchronization
 
-Goal: approved website, catalogue, and structured product sources are usable and maintainable.
+Goal: authorized website, catalogue, and structured product sources are usable and maintainable.
 
-- [ ] Confirm access/permission and source priority for the public website, Shopify/company exports, internal documents, PDF catalogues, CSV/Excel lists, and later ERP/CRM sources.
+- [ ] Register authorized source domains, uploads, and access scopes; confirm source priority and authoritative ownership for Shopify/company exports, internal documents, PDF catalogues, CSV/Excel lists, and later ERP/CRM sources. The supplied sitemap/site links and company profile are already approved for the internal prototype.
 - [ ] Add parsers only for approved formats actually needed (for example HTTPX/BeautifulSoup for HTML and PyMuPDF for PDFs).
 - [ ] Normalize product and variant identities, descriptions, specifications, brand/category, and source URLs.
 - [ ] Put exact structured data in PostgreSQL only with a defined owner and sync/freshness policy; keep descriptive documents in the retrieval index.
 - [ ] Implement checksums, re-indexing, deletions, job status, retries/error reporting, and source update timestamps.
-- [ ] Review extracted content for boilerplate, duplicates, marketing claims, and inaccurate or obsolete data before treating it as approved evidence.
+- [ ] Apply automated cleaning/deduplication and spot checks for boilerplate or inaccurate extraction; flag changing claims for authoritative lookup or a clear as-of caveat. Do not require individual approval of every imported page or file for internal retrieval.
 
 Exit: a changed or removed source is reflected correctly in both records and retrieval results, and each answerable fact has traceable provenance.
 
@@ -222,22 +223,22 @@ Goal: persist conversations and support follow-up questions with bounded context
 - [ ] Save messages, model metadata, timing/token counts when available, and only necessary tool/source references.
 - [ ] Send a bounded recent history; preserve product references needed for follow-ups.
 - [ ] Add conversation summaries only if actual usage requires them; never confuse a summary with company evidence.
-- [ ] Define retention and deletion behavior for customer data.
+- [ ] Define retention and deletion behavior for staff conversation data.
 
 Exit: users can continue and review their own conversations, and follow-ups resolve correctly without unbounded prompts.
 
 ## Phase 10 — Frontend and streaming
 
-Goal: a usable, responsive chat experience suitable for Sardars.
+Goal: a usable, responsive chat experience for Sardars admins and internal staff.
 
 - [ ] Choose React or Next.js based on actual hosting and product needs.
 - [ ] Build new chat, history/sidebar, Markdown display, source links, loading/error/retry states, and mobile layouts.
 - [ ] Add streaming, initially via SSE if it fits the API; keep streaming separate from retrieval and generation logic.
-- [ ] Make source references clear and hide internal-only URLs.
+- [ ] Make source references clear and show them only to roles authorized for those sources.
 - [ ] Ensure high-impact company claims are verified before they are shown, including during streaming.
 - [ ] Apply suitable accessibility and visual polish without delaying backend correctness.
 
-Exit: a user can ask, read cited answers, recover from errors, and return to earlier conversations on desktop and mobile.
+Exit: an authorized staff user can ask, read cited answers, recover from errors, and return to earlier conversations on desktop and mobile.
 
 ## Phase 11 — Full evaluation
 
@@ -267,7 +268,7 @@ Goal: a secure, observable deployment that can be operated and recovered.
 
 - [ ] Verify Ollama-to-vLLM adapter behavior with the selected model, tool format, streaming, and load profile.
 - [ ] Containerize services appropriately; keep PostgreSQL, Qdrant, and inference private behind the application network.
-- [ ] Add reverse proxy, HTTPS, authentication/authorization, rate limiting, secret handling, and environment-specific configuration.
+- [ ] Add reverse proxy, HTTPS, internal-user authentication/authorization, rate limiting, secret handling, and environment-specific configuration; do not expose the first release to public customers.
 - [ ] Plan GPU capacity, concurrency, request queues, timeouts, backups, database/vector persistence, restore tests, logging, monitoring, and alerts.
 - [ ] Use S3-compatible document storage only if deployment/storage needs justify it.
 - [ ] Run deployment smoke tests and failure/recovery drills; document operations and rollback.
@@ -276,7 +277,7 @@ Exit: the service is accessible to its intended users, private services are prot
 
 ## API, security, and observability conventions
 
-Candidate versioned endpoints include `GET /api/v1/health`, a separate readiness endpoint, `POST /api/v1/chat`, conversation list/detail routes, and protected ingestion/job routes. Final route names can evolve with implementation. Use Pydantic request/response schemas. Keep public and admin operations separate. A later streaming endpoint may use SSE.
+Candidate versioned endpoints include `GET /api/v1/health`, a separate readiness endpoint, `POST /api/v1/chat`, conversation list/detail routes, and protected ingestion/job routes. Final route names can evolve with implementation. Use Pydantic request/response schemas. Keep staff and admin operations separate. A later streaming endpoint may use SSE.
 
 Read-only tools can execute automatically after permission checks. Actions such as quote submission, lead creation, booking, email, orders, cancellations, or product changes require stronger authorization and explicit confirmation of the exact pending action. The model may request an action; it never grants itself permission. Do not expose raw database credentials, unrestricted SQL, shell execution, internal services, or secrets to the model. Keep retrieved content and tool results in a lower-trust boundary than application instructions.
 
