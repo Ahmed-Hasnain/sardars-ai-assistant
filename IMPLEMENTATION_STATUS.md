@@ -1,7 +1,7 @@
 # Sardars AI Assistant — implementation status
 
 Last updated: 2026-10-13
-Current phase: Phase 4 — Grounded RAG is next; the approved retrieval-only seed is working
+Current phase: Phase 4 — Grounded-answer CLI seed verified; broader evidence checks and internal access remain
 
 This file records **what has actually been built and verified**. `PLAN.md` describes the full roadmap and exit criteria; `AGENTS.md` tells AI coding agents how to work in this repository. If this file differs from the code, inspect the code and correct this file at the next major feature update.
 
@@ -23,8 +23,9 @@ Update this file when a **major feature or phase milestone is complete and verif
 - The project owner supplied the public website sitemap and company profile text. `data/source_inventory.md` records their provenance, `data/sources/company_profile.md` stores the pasted profile, and `backend/app/ingestion/public_site.py` discovers public sitemap links and extracts reviewable page, article, and product-description records. It checks robots rules, restricts URLs to the site and descriptive paths, limits each run, waits between requests, and leaves product offer data out of extracted text. Output records carry source identity, public visibility, fetch time, content checksum, and pending review status.
 - The developer pulled `qwen3-embedding:0.6b` in local Ollama and verified that `/api/embed` returns a 1,024-dimensional vector. Docker Compose runs Qdrant v1.19.2 on localhost port 6333 with a persistent `qdrant_data` volume. Collection `sardars_public_qwen3_embedding_06b_v1` uses 1,024-dimensional cosine vectors and holds three internally authorized seed points.
 - `backend/app/ingestion/chunking.py` splits two selected public records into three overlapping word-window chunks. `backend/app/ingestion/index_seed.py` validates the Sardars site URL, embeds the chunks, and upserts them with source metadata, `review_status: approved`, and `prototype_only: false`. `backend/app/retrieval/search_seed.py` embeds a question and supports separate approved and prototype CLI filters, returning scores, text, and URLs. The developer showed approved mode returning three chunks after re-indexing. These remain CLI prototypes, not an authenticated internal API retrieval path.
+- `backend/app/rag/answer_seed.py` adds a CLI answer prototype. It uses approved Qdrant results, keeps only authorized Sardars website payloads, finds source sentences containing the question's significant terms, and asks the local chat model to answer from those sentences. It maps valid citation numbers to source URLs, falls back to an exact source sentence when the small model's answer is unusable, and abstains without a citation when no sentence matches. This conservative lexical gate can miss paraphrases and does not establish general answerability.
 - `scripts/dev.sh` starts PostgreSQL and Qdrant, checks/starts host Ollama, runs FastAPI, and follows their logs in one terminal. Its foreground API and log followers stop on Ctrl+C; Docker containers and Ollama remain running.
-- The project owner has authorized the supplied sitemap/site links and company profile for the admin/staff-only prototype at the source level, without individual page approval. This policy is recorded in `PLAN.md` and `data/source_inventory.md` and applied to the three seed points at indexing. There is no grounded chat, internal-user authentication/authorization, frontend, or business database schema yet. Some blog articles discuss prices or promotions; source authorization does not verify those changing facts. The `services` package is still a placeholder.
+- The project owner has authorized the supplied sitemap/site links and company profile for the admin/staff-only prototype at the source level, without individual page approval. This policy is recorded in `PLAN.md` and `data/source_inventory.md` and applied to the three seed points at indexing. The HTTP chat endpoint is still ungrounded; there is no internal-user authentication/authorization, frontend, or business database schema yet. Some blog articles discuss prices or promotions; source authorization does not verify those changing facts. The `services` package is still a placeholder.
 
 Current request flow:
 
@@ -33,6 +34,7 @@ Browser or curl → Uvicorn → FastAPI → /health → liveness JSON
 Browser or curl → Uvicorn → FastAPI → /ready → SQLAlchemy → PostgreSQL → readiness JSON or HTTP 503
 Postman or curl → Uvicorn → FastAPI → /chat → chat interface → Ollama adapter → local Qwen3 0.6B → response JSON or HTTP 503
 CLI prototype → question embedding in Ollama → Qdrant approved-public vector query → ranked chunks with source URLs
+CLI answer seed → approved Qdrant chunks → matching source sentences → local chat model or exact sentence fallback → cited answer or abstention
 ```
 
 Verified evidence on 2026-10-12: PostgreSQL was healthy; Alembic `current` and PostgreSQL's `alembic_version` both reported `87b27fb5a926`; the initial smoke suite passed all three tests (with one dependency deprecation warning); `pip check` found no broken requirements; `docker compose config --quiet` passed; and Git ignored `.env` and `backend/.venv/`. The developer then showed a successful direct Ollama response and a successful `OllamaChatModel` response, reported six passing backend tests, and confirmed that the Postman chat request worked. These latter results are user-reported evidence, not a fresh test run for this documentation update. The README describes a fresh setup, but an independent clean-machine replay has not been performed.
@@ -51,6 +53,8 @@ Scope decision on 2026-10-13: the project owner changed the first release to adm
 
 Approved-retrieval checkpoint on 2026-10-13: the developer re-ran the seed indexer, showed a completed Qdrant upsert, and showed `search_seed.py --approved` returning three chunks labeled `Review: approved` for a brand question. The About Us chunks ranked first and second (0.616 and 0.550). The old indexer success message still said “prototype points” at the time of the screenshot; its wording has since been corrected in source code. The screenshot cuts off the subsequent default-mode search, so zero prototype matches have not been independently verified. No chat answer is grounded in this retrieval yet.
 
+Grounded-answer seed checkpoint on 2026-10-13: the first CLI version gave an unsupported return-policy abstention with a false citation and hid available brand evidence. The CLI was revised to match question terms against approved source sentences before model generation, strip unusable model citations, and use an exact sourced sentence when the model fails to answer. Six focused tests passed; an offline check against the saved seed chunks found two matching brand sentences and zero return-policy sentences. The developer then reported that the two live CLI commands now produce the expected results. This is user-reported live verification; no live Ollama/Qdrant request was available from this workspace. The company-specific HTTP chat route still does not use retrieval.
+
 ## Phase status
 
 | Phase | Major outcome | Status |
@@ -59,7 +63,7 @@ Approved-retrieval checkpoint on 2026-10-13: the developer re-ran the seed index
 | 1 | Backend foundation and PostgreSQL | Complete |
 | 2 | Local LLM through an inference interface | Complete |
 | 3 | Embeddings, Qdrant, and retrieval | Complete for the two-document approved CLI seed: three indexed chunks and diagnostic queries verified |
-| 4 | Grounded RAG with citations | Not started |
+| 4 | Grounded RAG with citations | In progress: two-question CLI seed verified; general answerability, evaluation, API integration, and staff access remain |
 | 5 | Real Sardars data and synchronization | Not started |
 | 6 | Safe read-only tools | Not started |
 | 7 | Combined structured search and RAG | Not started |
@@ -81,7 +85,8 @@ Approved-retrieval checkpoint on 2026-10-13: the developer re-ran the seed index
 | 2026-10-12 | Embedding and Qdrant runtime | Local model produces vectors; Qdrant runs with persistent storage and an empty 1,024-dimensional cosine collection; one-command launcher shows service logs | Developer measured 1,024 dimensions and verified green collection with zero points; live launcher/API/database/Qdrant smoke checks passed |
 | 2026-10-12 | Retrieval-only prototype | Two public records become three stored Qdrant points; a CLI question query returns ranked chunks with text and source URLs | Developer showed three points in dashboard and Shower Niche ranked first for a bathroom-storage question; points were pending/prototype-only at this stage |
 | 2026-10-13 | Approved seed retrieval | Source-authorized points appear in approved-filtered search with scores, text, and URLs | Developer showed completed upsert and three approved matches for a brand question |
+| 2026-10-13 | Grounded-answer CLI seed | Brand question returns sourced text; unsupported return-policy question abstains without a citation | Six focused tests passed; developer reported both live commands now give expected responses |
 
 ## Active work and next major milestone
 
-The first usable assistant is for admins and internal staff only. The project owner has authorized the supplied sitemap/site links and company profile, and future authorized admin/staff uploads or registered URLs follow a source-level internal approval policy. Next, connect approved retrieval to answer generation with actual citations and a missing-evidence fallback; do not infer a return policy from similarity scores. This is still a CLI-sized seed, not a production ingestion workflow. Staff-only documents can be indexed when supplied with role scope; internal authentication and role filtering must exist before wider staff access. Authoritative catalogue/price/stock data, required languages, and response-time targets remain open Phase 0 decisions in `PLAN.md`.
+The first usable assistant is for admins and internal staff only. The project owner has authorized the supplied sitemap/site links and company profile, and future authorized admin/staff uploads or registered URLs follow a source-level internal approval policy. Next, evaluate the CLI against more supported, unsupported, paraphrased, and adversarial questions; replace the narrow lexical gate with a more general evidence/answerability method once its failure cases are clear. The current HTTP chat route remains ungrounded, and internal authentication plus role/source enforcement must precede staff-facing API access. This is still a two-document seed, not a production ingestion workflow. Staff-only documents can be indexed when supplied with role scope. Authoritative catalogue/price/stock data, required languages, and response-time targets remain open Phase 0 decisions in `PLAN.md`.

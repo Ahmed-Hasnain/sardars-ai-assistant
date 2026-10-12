@@ -70,3 +70,12 @@ The prototype selects the public About Us and Shower Niche records from `data/ex
     PYTHONPATH=backend backend/.venv/bin/python -m app.retrieval.search_seed --approved "What bathroom storage product does Sardars describe?"
 
 `chunking.py` writes three 100-word-maximum chunks with 15-word overlap to `data/extracted/rag_seed_chunks.jsonl`. `index_seed.py` validates that their URLs match the authorized Sardars site, embeds them, and upserts them with `review_status: approved`, `approval_basis: owner_authorized_source_for_internal_use`, and `prototype_only: false`. `search_seed.py --approved` embeds a question and prints ranked text, source URLs, and similarity scores. Its default mode is the old pending/prototype diagnostic filter and should now return no seed points. The local extracted files are ignored by Git and retain their original `pending` labels; authorization is applied when indexing. On 2026-10-13 the project owner authorized the supplied sources for internal use and chose source-level approval for future authorized admin/staff uploads and registered URLs. The current chat endpoint still does not use Qdrant, and no internal-user authentication or role filtering exists yet. The CLI scripts are a learning prototype, not a source synchronization workflow.
+
+## Grounded-answer CLI seed
+
+With Ollama and Qdrant running and the three seed points indexed, try:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.rag.answer_seed "Which brands does Sardars mention?"
+    PYTHONPATH=backend backend/.venv/bin/python -m app.rag.answer_seed "What is Sardars' return policy?"
+
+The first question should show an exact brand sentence from the About Us source with its URL; the second should say it cannot verify the policy and show no citation. This CLI filters for approved Sardars website chunks and uses a conservative question-term match to find source sentences before calling the local chat model. If the small model's answer or citation is unusable, it prints an exact matching source sentence. This is a two-document learning checkpoint: the term match can miss paraphrases and does not prove general answerability. The `/api/v1/chat` endpoint is still separate and ungrounded; do not expose this CLI flow as staff-facing API behavior before authentication and role/source checks exist.
