@@ -1,0 +1,205 @@
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
+import httpx
+import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.auth.security import hash_password, token_hash, verify_password
+from app.auth.create_user import main as create_user_main
+from app.db.base import Base
+from app.db.models import LoginSession, User
+from app.db.session import get_db
+from app.llm.base import ChatResult
+from app.main import app
+
+
+PASSWORD = "correct horse battery staple"
+SOURCE_URL = "https://sardarandco.com/pages/about-us"
+
+
+@pytest.fixture
+def local_app():
+    engine = create_engine(
+        "sqlite+pysqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+
+    def override_db():
+        with sessions() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            yield client, sessions
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def _create_user(sessions, email: str, role: str = "staff") -> User:
+    with sessions() as db:
+        user = User(email=email, password_hash=hash_password(PASSWORD), role=role)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        db.expunge(user)
+    return user
+
+
+def _login(client: TestClient, email: str) -> str:
+    response = client.post(
+        "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["access_token"]
+
+
+def _headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _brand_point() -> dict:
+    return {"payload": {
+        "visibility": "public", "review_status": "approved", "prototype_only": False,
+        "source_type": "pages", "title": "About Us", "url": SOURCE_URL,
+        "text": "Sardars mentions brands like Bongio, Scarabeo and Grohe.",
+    }}
+
+
+def test_passwords_are_salted_and_verified() -> None:
+    first = hash_password(PASSWORD)
+    second = hash_password(PASSWORD)
+    assert first != second
+    assert PASSWORD not in first
+    assert verify_password(PASSWORD, first)
+    assert not verify_password("wrong password", first)
+    assert not verify_password(PASSWORD, None)
+
+
+def test_login_is_revocable_and_stores_only_a_token_hash(local_app) -> None:
+    client, sessions = local_app
+    user = _create_user(sessions, "staff@example.com")
+    assert client.post("/api/v1/auth/login", json={
+        "email": user.email, "password": "wrong password",
+    }).status_code == 401
+
+    token = _login(client, "STAFF@EXAMPLE.COM")
+    with sessions() as db:
+        saved = db.scalar(select(LoginSession))
+        assert saved is not None
+        assert saved.token_hash == token_hash(token)
+        assert token != saved.token_hash
+
+    assert client.get("/api/v1/auth/me", headers=_headers(token)).json()["role"] == "staff"
+    assert client.post("/api/v1/auth/logout", headers=_headers(token)).status_code == 204
+    assert client.get("/api/v1/auth/me", headers=_headers(token)).status_code == 401
+
+
+def test_staff_cannot_list_users_but_admin_can(local_app) -> None:
+    client, sessions = local_app
+    _create_user(sessions, "staff@example.com")
+    _create_user(sessions, "admin@example.com", role="admin")
+
+    staff_token = _login(client, "staff@example.com")
+    admin_token = _login(client, "admin@example.com")
+    assert client.get("/api/v1/admin/users", headers=_headers(staff_token)).status_code == 403
+    response = client.get("/api/v1/admin/users", headers=_headers(admin_token))
+    assert response.status_code == 200
+    assert {item["email"] for item in response.json()} == {
+        "staff@example.com", "admin@example.com",
+    }
+    assert all("password_hash" not in item for item in response.json())
+
+
+def test_disabled_user_loses_access_immediately(local_app) -> None:
+    client, sessions = local_app
+    user = _create_user(sessions, "staff@example.com")
+    token = _login(client, user.email)
+    with sessions() as db:
+        saved = db.get(User, user.id)
+        saved.is_active = False
+        db.commit()
+
+    assert client.get("/api/v1/auth/me", headers=_headers(token)).status_code == 401
+
+
+def test_expired_session_and_role_changes_take_effect_immediately(local_app) -> None:
+    client, sessions = local_app
+    user = _create_user(sessions, "staff@example.com")
+    token = _login(client, user.email)
+    with sessions() as db:
+        db.get(User, user.id).role = "admin"
+        db.commit()
+    assert client.get("/api/v1/admin/users", headers=_headers(token)).status_code == 200
+
+    with sessions() as db:
+        db.get(LoginSession, token_hash(token)).expires_at_epoch = 0
+        db.commit()
+    assert client.get("/api/v1/auth/me", headers=_headers(token)).status_code == 401
+
+
+def test_create_user_command_requires_first_admin_and_prompts_for_password(
+    local_app, monkeypatch
+) -> None:
+    _client, sessions = local_app
+    monkeypatch.setattr("app.auth.create_user.SessionLocal", sessions)
+    monkeypatch.setattr("app.auth.create_user.getpass", lambda _prompt: PASSWORD)
+    monkeypatch.setattr(
+        "sys.argv", ["create_user", "--email", "staff@example.com", "--role", "staff"]
+    )
+    with pytest.raises(SystemExit, match="first user must be an admin"):
+        create_user_main()
+
+    monkeypatch.setattr(
+        "sys.argv", ["create_user", "--email", "Admin@Example.com", "--role", "admin"]
+    )
+    create_user_main()
+    with sessions() as db:
+        admin = db.scalar(select(User))
+        assert admin.email == "admin@example.com"
+        assert admin.role == "admin"
+        assert verify_password(PASSWORD, admin.password_hash)
+
+
+def test_ask_checks_auth_before_retrieval_and_returns_citations(local_app) -> None:
+    client, sessions = local_app
+    _create_user(sessions, "staff@example.com")
+    with patch("app.api.ask.search_approved") as search:
+        assert client.post("/api/v1/ask", json={"message": "Which brands?"}).status_code == 401
+        search.assert_not_called()
+
+    token = _login(client, "staff@example.com")
+    with (
+        patch("app.api.ask.search_approved", return_value=[_brand_point()]),
+        patch("app.api.ask.answer_model.chat", new_callable=AsyncMock) as chat,
+    ):
+        chat.return_value = ChatResult(
+            "Sardars mentions Bongio, Scarabeo and Grohe. [1]", "test", None, None, None
+        )
+        response = client.post(
+            "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
+        )
+
+    assert response.status_code == 200
+    assert response.json()["sources"] == [{"title": "About Us", "url": SOURCE_URL}]
+    assert "Bongio" in response.json()["answer"]
+
+
+def test_chat_requires_auth_and_ask_hides_retrieval_failures(local_app) -> None:
+    client, sessions = local_app
+    _create_user(sessions, "staff@example.com")
+    assert client.post("/api/v1/chat", json={"message": "Hello"}).status_code == 401
+    token = _login(client, "staff@example.com")
+    with patch("app.api.ask.search_approved", side_effect=httpx.ConnectError("down")):
+        response = client.post(
+            "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Answer service unavailable"}

@@ -1,6 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth.dependencies import get_current_user
 from app.core.config import Settings
+from app.db.models import User
 from app.llm.base import ChatMessage, ChatModel, ModelError
 from app.llm.ollama import OllamaChatModel
 from app.schemas.chat import ChatRequest, ChatResponse
@@ -18,7 +22,10 @@ chat_model: ChatModel = OllamaChatModel(Settings())
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    _user: Annotated[User, Depends(get_current_user)],
+) -> ChatResponse:
     messages: list[ChatMessage] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": request.message},

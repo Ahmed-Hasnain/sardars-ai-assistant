@@ -18,6 +18,9 @@ done
 echo "Starting PostgreSQL and Qdrant..."
 COMPOSE_PROGRESS=plain docker compose up -d --wait db qdrant
 
+echo "Applying database migrations..."
+backend/.venv/bin/alembic upgrade head
+
 if ! curl --fail --silent --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null; then
   echo "Starting the host Ollama service (sudo may request your password)..."
   sudo systemctl start ollama

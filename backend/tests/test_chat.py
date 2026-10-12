@@ -1,11 +1,20 @@
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+import pytest
 
+from app.auth.dependencies import get_current_user
 from app.llm.base import ChatResult, ModelError
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def authenticated_user():
+    app.dependency_overrides[get_current_user] = lambda: object()
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_chat_returns_unverified_answer() -> None:

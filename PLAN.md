@@ -32,7 +32,7 @@ These questions do not block the remaining Phase 1 work. Record the chosen answe
 
 | Decision | Why it matters | Current state |
 | --- | --- | --- |
-| First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Exact internal roles and access rules pending. |
+| First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Local admin/staff login is implemented. Both roles may access the approved public-site seed; admins can list account metadata. Access rules for future staff-only sources remain open. |
 | First 10–20 user questions and success criteria | Defines the first useful AI slice and evaluation set | Open |
 | Authoritative product catalogue, price, and stock source | Determines SQL sync and what can be called current | Open; the [public website](https://sardarandco.com/) identifies Shopify as its store platform, but access and data ownership must be confirmed |
 | Source approval for the internal release | Determines which material may enter internal retrieval | On 2026-10-13 the project owner approved the supplied Sardars sitemap/site links and pasted company profile, and chose source-level approval for future files, documents, and URLs supplied or registered by authorized admins/staff. Do not require per-document manual review for the first release. The developer has no staff-only documents yet; see `data/source_inventory.md`. |

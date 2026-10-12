@@ -1,6 +1,6 @@
 # Sardars AI Assistant
 
-A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. The current implementation has a FastAPI backend, PostgreSQL, Alembic migrations, health checks, local-model chat through Ollama, and a retrieval-only Qdrant prototype.
+A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. The current implementation has a FastAPI backend, PostgreSQL, Alembic migrations, revocable internal login, health checks, local-model chat through Ollama, and an approved-source Qdrant answer prototype.
 
 ## Local setup
 
@@ -18,6 +18,10 @@ Start PostgreSQL and apply migrations:
     docker compose up -d --wait db
     backend/.venv/bin/alembic upgrade head
 
+Create the first admin account. The command prompts for the password twice without echoing it or putting it in shell history:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.auth.create_user --email you@example.com --role admin
+
 Start the API in another terminal:
 
     backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port 8000
@@ -30,7 +34,13 @@ Run the smoke tests while PostgreSQL is running:
 
 Stop PostgreSQL with `docker compose stop db`; its data is retained. Keep `.env` and `backend/.venv/` out of Git.
 
-For daily development, run `./scripts/dev.sh` from the project root. It starts PostgreSQL and Qdrant through Docker Compose, starts the installed Ollama system service if needed, runs FastAPI, and follows all four services' logs in one terminal. If Ollama is stopped, `sudo` may ask for your password. Press Ctrl+C to stop FastAPI and the log followers; the Docker containers and Ollama service remain running. Stop the containers later with `docker compose stop db qdrant`.
+For daily development, run `./scripts/dev.sh` from the project root. It starts PostgreSQL and Qdrant through Docker Compose, applies pending database migrations, starts the installed Ollama system service if needed, runs FastAPI, and follows all four services' logs in one terminal. If Ollama is stopped, `sudo` may ask for your password. Press Ctrl+C to stop FastAPI and the log followers; the Docker containers and Ollama service remain running. Stop the containers later with `docker compose stop db qdrant`.
+
+## Internal login and roles
+
+The first account must be an admin. A local operator can create additional accounts with the same command and `--role staff` or `--role admin`; the command always prompts for a password. Passwords are stored as salted scrypt hashes. Login issues a random bearer token valid for eight hours; PostgreSQL stores only its hash. Logout deletes that session, and disabling a user or changing a role takes effect on the next request. Both roles may query the current approved public-site seed; only admins may call `GET /api/v1/admin/users`. Staff-only documents and role-scoped retrieval are not implemented yet.
+
+In Postman, send `POST http://127.0.0.1:8000/api/v1/auth/login` with JSON `{"email":"you@example.com","password":"your-password"}`. Copy the returned `access_token` into Postman's **Authorization → Bearer Token** field. You can then call `GET /api/v1/auth/me`, `POST /api/v1/chat`, and `POST /api/v1/ask`; `POST /api/v1/auth/logout` revokes the token. Do not put passwords or bearer tokens into a committed file. Keep the API bound to localhost during development; HTTPS, login rate limiting, and broader role-scoped source rules remain deployment work.
 
 ## Local-model chat
 
@@ -38,9 +48,10 @@ Install Ollama using its [Linux instructions](https://docs.ollama.com/linux), th
 
     ollama pull qwen3:0.6b
 
-With Ollama and the API running, send a request from Postman or the terminal:
+With Ollama and the API running, send a request from Postman using the bearer token above. For a terminal request, paste the token into a silent prompt first so it is not recorded in shell history:
 
-    curl -sS http://127.0.0.1:8000/api/v1/chat -H 'Content-Type: application/json' -d '{"message":"Explain what a database is in one sentence."}'
+    read -rs -p 'Bearer token: ' SARDARS_TOKEN; printf '\n'
+    curl -sS http://127.0.0.1:8000/api/v1/chat -H "Authorization: Bearer $SARDARS_TOKEN" -H 'Content-Type: application/json' -d '{"message":"Explain what a database is in one sentence."}'
 
 `POST /api/v1/chat` returns an answer, model name, token counts, duration, and `company_data_verified: false`. It currently answers general questions without a Sardars source of truth; do not treat its Sardars-specific claims as verified. The Ollama settings in `.env.example` default to `qwen3:0.6b` on localhost with `keep_alive=0` to unload the model after each request. This reduces memory use but adds model load time to each request.
 
@@ -52,7 +63,7 @@ From the project root, extract one page, one article, and one product:
 
     PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.public_site --limit-per-type 1 --output data/extracted/public_site_sample.jsonl
 
-Each JSONL record includes a stable source ID, public visibility, pending review status, source type, URL, title, fetch time, content checksum, and extracted text. The output directory is ignored by Git. Inspect the records before increasing `--limit-per-type` (maximum 1500 per type). The current chat endpoint does not use these records. Staff-only material must wait until staff authentication and source filtering exist.
+Each JSONL record includes a stable source ID, public visibility, pending review status, source type, URL, title, fetch time, content checksum, and extracted text. The output directory is ignored by Git. Inspect the records before increasing `--limit-per-type` (maximum 1500 per type). The general chat endpoint does not use these records. Staff-only material must wait until source-specific role filtering exists.
 
 A full public crawl was run on 2026-10-12 with `--limit-per-type 1500 --delay-seconds 0.5 --output data/extracted/public_site_full.jsonl`. It produced 1,008 review records; 142 product links did not yield useful text. The local audit is `data/extracted/public_site_audit.md`. Both files remain ignored by Git. Some descriptions and articles include changing claims despite excluding structured offer fields, so review them before any indexing or answer generation.
 
@@ -69,7 +80,7 @@ The prototype selects the public About Us and Shower Niche records from `data/ex
     PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.index_seed
     PYTHONPATH=backend backend/.venv/bin/python -m app.retrieval.search_seed --approved "What bathroom storage product does Sardars describe?"
 
-`chunking.py` writes three 100-word-maximum chunks with 15-word overlap to `data/extracted/rag_seed_chunks.jsonl`. `index_seed.py` validates that their URLs match the authorized Sardars site, embeds them, and upserts them with `review_status: approved`, `approval_basis: owner_authorized_source_for_internal_use`, and `prototype_only: false`. `search_seed.py --approved` embeds a question and prints ranked text, source URLs, and similarity scores. Its default mode is the old pending/prototype diagnostic filter and should now return no seed points. The local extracted files are ignored by Git and retain their original `pending` labels; authorization is applied when indexing. On 2026-10-13 the project owner authorized the supplied sources for internal use and chose source-level approval for future authorized admin/staff uploads and registered URLs. The current chat endpoint still does not use Qdrant, and no internal-user authentication or role filtering exists yet. The CLI scripts are a learning prototype, not a source synchronization workflow.
+`chunking.py` writes three 100-word-maximum chunks with 15-word overlap to `data/extracted/rag_seed_chunks.jsonl`. `index_seed.py` validates that their URLs match the authorized Sardars site, embeds them, and upserts them with `review_status: approved`, `approval_basis: owner_authorized_source_for_internal_use`, and `prototype_only: false`. `search_seed.py --approved` embeds a question and prints ranked text, source URLs, and similarity scores. Its default mode is the old pending/prototype diagnostic filter and should now return no seed points. The local extracted files are ignored by Git and retain their original `pending` labels; authorization is applied when indexing. On 2026-10-13 the project owner authorized the supplied sources for internal use and chose source-level approval for future authorized admin/staff uploads and registered URLs. The general chat endpoint still does not use Qdrant; the protected `/api/v1/ask` endpoint uses this small approved public-site seed. The CLI scripts are a learning prototype, not a source synchronization workflow.
 
 ## Grounded-answer CLI seed
 
@@ -78,4 +89,4 @@ With Ollama and Qdrant running and the three seed points indexed, try:
     PYTHONPATH=backend backend/.venv/bin/python -m app.rag.answer_seed "Which brands does Sardars mention?"
     PYTHONPATH=backend backend/.venv/bin/python -m app.rag.answer_seed "What is Sardars' return policy?"
 
-The first question should show an exact brand sentence from the About Us source with its URL; the second should say it cannot verify the policy and show no citation. This CLI filters for approved Sardars website chunks and uses a conservative question-term match to find source sentences before calling the local chat model. If the small model's answer or citation is unusable, it prints an exact matching source sentence. This is a two-document learning checkpoint: the term match can miss paraphrases and does not prove general answerability. The `/api/v1/chat` endpoint is still separate and ungrounded; do not expose this CLI flow as staff-facing API behavior before authentication and role/source checks exist.
+The first question should show an exact brand sentence from the About Us source with its URL; the second should say it cannot verify the policy and show no citation. This CLI filters for approved Sardars website chunks and uses a conservative question-term match to find source sentences before calling the local chat model. If the small model's answer or citation is unusable, it prints an exact matching source sentence. This is a two-document learning checkpoint: the term match can miss paraphrases and does not prove general answerability. The protected `POST /api/v1/ask` route uses the same seed flow and accepts `{"message":"Which brands does Sardars mention?"}`. The separate `/api/v1/chat` endpoint remains ungrounded.
