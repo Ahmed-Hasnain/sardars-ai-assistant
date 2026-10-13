@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.ask import SourceCitation
+
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
@@ -17,7 +19,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    model: str
+    route: Literal["general", "company"]
+    sources: list[SourceCitation] = Field(default_factory=list)
+    model: str | None
     company_data_verified: Literal[False] = False
     prompt_tokens: int | None = None
     output_tokens: int | None = None

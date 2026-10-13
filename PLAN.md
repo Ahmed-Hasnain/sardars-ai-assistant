@@ -32,7 +32,7 @@ These questions do not block the remaining Phase 1 work. Record the chosen answe
 
 | Decision | Why it matters | Current state |
 | --- | --- | --- |
-| First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Local admin/staff login is implemented. Both roles may access the approved public-site seed; admins can list account metadata. Access rules for future staff-only sources remain open. |
+| First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Local admin/staff login is implemented. Both roles may access the approved public-site seed; admins can list account metadata. Source registrations support public, staff, and admin visibility; real private-source ingestion remains for Phase 5. |
 | First 10–20 user questions and success criteria | Defines the first useful AI slice and evaluation set | Open |
 | Authoritative product catalogue, price, and stock source | Determines SQL sync and what can be called current | Open; the [public website](https://sardarandco.com/) identifies Shopify as its store platform, but access and data ownership must be confirmed |
 | Source approval for the internal release | Determines which material may enter internal retrieval | On 2026-10-13 the project owner approved the supplied Sardars sitemap/site links and pasted company profile, and chose source-level approval for future files, documents, and URLs supplied or registered by authorized admins/staff. Do not require per-document manual review for the first release. The developer has no staff-only documents yet; see `data/source_inventory.md`. |
@@ -158,14 +158,14 @@ Exit: questions retrieve the expected internally authorized chunks, with source 
 
 Goal: answer company questions from retrieved evidence and cite it.
 
-- [ ] Route general educational questions and company-specific questions appropriately; start with simple, inspectable routing.
-- [ ] Build a context budget, evidence selection, prompt, and grounded response format.
-- [ ] Return source IDs, titles, safe URLs, and update/as-of data where relevant; avoid invented or unusable citations.
-- [ ] Refuse unsupported company-specific claims when evidence is missing or contradictory.
-- [ ] Enforce internal role/source visibility and treat retrieved text as untrusted at this stage.
-- [ ] Start an evaluation set covering correct retrieval, missing evidence, unsupported claims, and prompt injection.
+- [x] Route clearly general educational questions to the local model and company/ambiguous questions to registered-source retrieval using an inspectable conservative rule.
+- [x] Bound retrieved excerpts and total evidence, select matching source sentences, and return a grounded response or exact sourced fallback.
+- [x] Return numbered citations with source IDs, titles, safe Sardars URLs, and source fetch time; normalize citation markers to the returned entries.
+- [x] Abstain when evidence is missing, changing facts lack an authoritative source, or matched excerpts have obvious numeric/negation conflicts.
+- [x] Check roles and registered source identity before prompt assembly; exercise staff/admin boundaries with a synthetic admin-only source and filter obvious retrieved instructions.
+- [x] Run a repeatable seed evaluation covering retrieval, missing evidence, unsupported price/policy claims, prompt injection, and conflicting evidence.
 
-Exit: the sample questions have supported answers or explicit “not verified” responses, and citations lead to the evidence actually used.
+Exit met for the two-document approved seed on 2026-10-13: the six evaluation cases passed, and authenticated general/company routes were checked live. Citations refer to the selected evidence. Real private-document ingestion, broader company coverage, and more robust answerability are Phase 5 and later work.
 
 ## Phase 5 — Real Sardars data and synchronization
 

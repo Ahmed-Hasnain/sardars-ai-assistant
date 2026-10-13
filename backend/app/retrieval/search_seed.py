@@ -3,13 +3,20 @@ import sys
 import httpx
 
 from app.ingestion.index_seed import COLLECTION, MODEL
+from app.retrieval.authorization import ALLOWED_VISIBILITIES
 
 
-def _query(question: str, conditions: list[dict]) -> list[dict]:
+def _query(question: str, conditions: list[dict], visibility: set[str] | None = None) -> list[dict]:
     if not question.strip():
         raise ValueError("Question cannot be blank")
 
     with httpx.Client(timeout=120) as client:
+        point_filter: dict = {"must": conditions}
+        if visibility is not None:
+            point_filter["should"] = [
+                {"key": "visibility", "match": {"value": value}}
+                for value in sorted(visibility)
+            ]
         response = client.post(
             "http://127.0.0.1:11434/api/embed",
             json={"model": MODEL, "input": question, "truncate": False},
@@ -24,7 +31,7 @@ def _query(question: str, conditions: list[dict]) -> list[dict]:
             f"http://127.0.0.1:6333/collections/{COLLECTION}/points/query",
             json={
                 "query": vector,
-                "filter": {"must": conditions},
+                "filter": point_filter,
                 "limit": 3,
                 "with_payload": True,
                 "with_vector": False,
@@ -43,6 +50,21 @@ def search_approved(question: str) -> list[dict]:
             {"key": "review_status", "match": {"value": "approved"}},
             {"key": "prototype_only", "match": {"value": False}},
         ],
+    )
+
+
+def search_for_role(question: str, role: str) -> list[dict]:
+    """Prefilter permitted visibility; PostgreSQL still authorizes each point."""
+    visibility = ALLOWED_VISIBILITIES.get(role)
+    if visibility is None:
+        return []
+    return _query(
+        question,
+        [
+            {"key": "review_status", "match": {"value": "approved"}},
+            {"key": "prototype_only", "match": {"value": False}},
+        ],
+        visibility,
     )
 
 

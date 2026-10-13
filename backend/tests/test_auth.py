@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, patch
+from hashlib import sha256
 
 from fastapi.testclient import TestClient
 import httpx
@@ -9,8 +10,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth.security import hash_password, token_hash, verify_password
 from app.auth.create_user import main as create_user_main
+from app.auth.reset_password import main as reset_password_main
 from app.db.base import Base
-from app.db.models import LoginSession, User
+from app.db.models import LoginSession, SourceRegistration, User
 from app.db.session import get_db
 from app.llm.base import ChatResult
 from app.main import app
@@ -18,6 +20,8 @@ from app.main import app
 
 PASSWORD = "correct horse battery staple"
 SOURCE_URL = "https://sardarandco.com/pages/about-us"
+SOURCE_ID = sha256(SOURCE_URL.encode()).hexdigest()
+CONTENT_SHA256 = sha256(b"test source content").hexdigest()
 
 
 @pytest.fixture
@@ -68,9 +72,21 @@ def _headers(token: str) -> dict[str, str]:
 def _brand_point() -> dict:
     return {"payload": {
         "visibility": "public", "review_status": "approved", "prototype_only": False,
-        "source_type": "pages", "title": "About Us", "url": SOURCE_URL,
+        "source_id": SOURCE_ID, "source_type": "pages", "title": "About Us", "url": SOURCE_URL,
+        "content_sha256": CONTENT_SHA256,
         "text": "Sardars mentions brands like Bongio, Scarabeo and Grohe.",
     }}
+
+
+def _register_brand_source(sessions, *, visibility: str = "public", is_active: bool = True) -> None:
+    with sessions() as db:
+        db.add(SourceRegistration(
+            source_id=SOURCE_ID, url=SOURCE_URL, source_type="pages",
+            content_sha256=CONTENT_SHA256,
+            visibility=visibility, is_active=is_active,
+            authorization_basis="test_source_authorization",
+        ))
+        db.commit()
 
 
 def test_passwords_are_salted_and_verified() -> None:
@@ -168,16 +184,58 @@ def test_create_user_command_requires_first_admin_and_prompts_for_password(
         assert verify_password(PASSWORD, admin.password_hash)
 
 
+def test_reset_password_revokes_existing_sessions(local_app, monkeypatch) -> None:
+    client, sessions = local_app
+    user = _create_user(sessions, "admin@example.com", role="admin")
+    old_token = _login(client, user.email)
+    new_password = "new private password 123"
+    monkeypatch.setattr("app.auth.reset_password.SessionLocal", sessions)
+    monkeypatch.setattr("app.auth.reset_password.getpass", lambda _prompt: new_password)
+    monkeypatch.setattr(
+        "sys.argv", ["reset_password", "--email", "ADMIN@EXAMPLE.COM"]
+    )
+
+    reset_password_main()
+
+    assert client.get("/api/v1/auth/me", headers=_headers(old_token)).status_code == 401
+    assert client.post("/api/v1/auth/login", json={
+        "email": user.email, "password": PASSWORD,
+    }).status_code == 401
+    assert client.post("/api/v1/auth/login", json={
+        "email": user.email, "password": new_password,
+    }).status_code == 200
+    with sessions() as db:
+        assert verify_password(new_password, db.get(User, user.id).password_hash)
+
+
+def test_reset_password_rejects_mismatch_without_revoking_sessions(local_app, monkeypatch) -> None:
+    client, sessions = local_app
+    user = _create_user(sessions, "admin@example.com", role="admin")
+    token = _login(client, user.email)
+    replies = iter(["new private password 123", "different password 123"])
+    monkeypatch.setattr("app.auth.reset_password.SessionLocal", sessions)
+    monkeypatch.setattr("app.auth.reset_password.getpass", lambda _prompt: next(replies))
+    monkeypatch.setattr(
+        "sys.argv", ["reset_password", "--email", user.email]
+    )
+
+    with pytest.raises(SystemExit, match="Passwords do not match"):
+        reset_password_main()
+
+    assert client.get("/api/v1/auth/me", headers=_headers(token)).status_code == 200
+
+
 def test_ask_checks_auth_before_retrieval_and_returns_citations(local_app) -> None:
     client, sessions = local_app
     _create_user(sessions, "staff@example.com")
-    with patch("app.api.ask.search_approved") as search:
+    _register_brand_source(sessions)
+    with patch("app.services.company_answer.search_for_role") as search:
         assert client.post("/api/v1/ask", json={"message": "Which brands?"}).status_code == 401
         search.assert_not_called()
 
     token = _login(client, "staff@example.com")
     with (
-        patch("app.api.ask.search_approved", return_value=[_brand_point()]),
+        patch("app.services.company_answer.search_for_role", return_value=[_brand_point()]),
         patch("app.api.ask.answer_model.chat", new_callable=AsyncMock) as chat,
     ):
         chat.return_value = ChatResult(
@@ -188,8 +246,35 @@ def test_ask_checks_auth_before_retrieval_and_returns_citations(local_app) -> No
         )
 
     assert response.status_code == 200
-    assert response.json()["sources"] == [{"title": "About Us", "url": SOURCE_URL}]
+    assert response.json()["sources"] == [{
+        "number": 1, "source_id": SOURCE_ID, "title": "About Us",
+        "url": SOURCE_URL, "fetched_at": None,
+    }]
     assert "Bongio" in response.json()["answer"]
+
+
+def test_ask_ignores_unregistered_or_disabled_source(local_app) -> None:
+    client, sessions = local_app
+    _create_user(sessions, "staff@example.com")
+    token = _login(client, "staff@example.com")
+    with (
+        patch("app.services.company_answer.search_for_role", return_value=[_brand_point()]),
+        patch("app.api.ask.answer_model.chat", new_callable=AsyncMock) as chat,
+    ):
+        response = client.post(
+            "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
+        )
+        assert response.status_code == 200
+        assert response.json()["sources"] == []
+        chat.assert_not_called()
+
+        _register_brand_source(sessions, is_active=False)
+        response = client.post(
+            "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
+        )
+        assert response.status_code == 200
+        assert response.json()["sources"] == []
+        chat.assert_not_called()
 
 
 def test_chat_requires_auth_and_ask_hides_retrieval_failures(local_app) -> None:
@@ -197,7 +282,7 @@ def test_chat_requires_auth_and_ask_hides_retrieval_failures(local_app) -> None:
     _create_user(sessions, "staff@example.com")
     assert client.post("/api/v1/chat", json={"message": "Hello"}).status_code == 401
     token = _login(client, "staff@example.com")
-    with patch("app.api.ask.search_approved", side_effect=httpx.ConnectError("down")):
+    with patch("app.services.company_answer.search_for_role", side_effect=httpx.ConnectError("down")):
         response = client.post(
             "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
         )

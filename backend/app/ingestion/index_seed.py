@@ -3,6 +3,10 @@ from pathlib import Path
 from app.ingestion.public_site import source_type
 
 import httpx
+from sqlalchemy import select
+
+from app.db.models import SourceRegistration
+from app.db.session import SessionLocal
 
 CHUNKS_FILE = Path("data/extracted/rag_seed_chunks.jsonl")
 MODEL = "qwen3-embedding:0.6b"
@@ -21,6 +25,24 @@ def main() -> None:
     or source_type(chunk["url"]) != chunk["source_type"]
     for chunk in chunks ):
         raise ValueError("Only authorized Sardars website chunks can be indexed")
+
+    with SessionLocal() as db:
+        registrations = {
+            source.source_id: source
+            for source in db.scalars(select(SourceRegistration).where(
+                SourceRegistration.source_id.in_({chunk["source_id"] for chunk in chunks})
+            ))
+        }
+        if any(
+            (source := registrations.get(chunk["source_id"])) is None
+            or not source.is_active
+            or source.visibility != "public"
+            or source.url != chunk["url"]
+            or source.source_type != chunk["source_type"]
+            or source.content_sha256 != chunk["content_sha256"]
+            for chunk in chunks
+        ):
+            raise ValueError("Register the active seed sources before indexing")
 
     with httpx.Client(timeout=120) as client:
         response = client.post(
