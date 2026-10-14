@@ -73,6 +73,14 @@ class FakeIndex:
     def check_collection(self) -> None:
         self.checked = True
 
+    def source_is_current(self, chunks: list[dict], authorization_basis: str) -> bool:
+        return all(
+            chunk["id"] in self.points
+            and self.points[chunk["id"]]["payload"]["text"] == chunk["text"]
+            and self.points[chunk["id"]]["payload"]["content_sha256"] == chunk["content_sha256"]
+            for chunk in chunks
+        )
+
     def upsert_chunks(self, chunks: list[dict], authorization: dict[str, str]) -> None:
         self.batches += 1
         for chunk in chunks:
@@ -111,8 +119,45 @@ def test_repeat_import_preserves_registrations_provenance_and_chunk_ids(sessions
         assert len(authorized_points(db, "staff", list(index.points.values()))) == 3
     assert index.checked and len(index.points) == 3
     assert result.new_sources == 1 and result.indexed_chunks == 3
-    assert repeated.new_sources == 0 and repeated.indexed_chunks == 3
-    assert index.batches == 2  # Unchanged-content skipping is Step 3.
+    assert repeated.new_sources == 0 and repeated.indexed_chunks == 0
+    assert repeated.skipped_sources == 2 and repeated.skipped_chunks == 3
+    assert all(source.index_action == "skipped" for source in repeated.sources)
+    assert index.batches == 1
+
+
+def test_matching_registry_checksum_does_not_hide_missing_chunks(sessions) -> None:
+    documents = [_document(), _document(PRODUCT_URL, 32)]
+    for document in documents:
+        _register(sessions, document)
+    index = FakeIndex()
+    with sessions.begin() as db:
+        initial = apply_import(db, documents, index)
+    assert initial.new_sources == 0 and initial.indexed_chunks == 3
+    assert initial.skipped_sources == 0
+
+    missing = next(key for key, point in index.points.items() if point["payload"]["source_id"] == documents[0].source_id)
+    del index.points[missing]
+    with sessions.begin() as db:
+        repaired = apply_import(db, documents, index)
+    assert repaired.indexed_chunks == 2 and repaired.skipped_chunks == 1
+    assert [source.index_action for source in repaired.sources] == ["indexed", "skipped"]
+    assert len(index.points) == 3
+
+
+def test_index_check_failure_prevents_embedding_and_new_registration(sessions) -> None:
+    class FailedCheck(FakeIndex):
+        def source_is_current(self, chunks: list[dict], authorization_basis: str) -> bool:
+            raise IndexingError("Qdrant returned an invalid index-check response")
+
+    existing, new = _document(), _document(PRODUCT_URL, 32)
+    _register(sessions, existing)
+    index = FailedCheck()
+    with pytest.raises(IndexingError):
+        with sessions.begin() as db:
+            apply_import(db, [new, existing], index)
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(SourceRegistration)) == 1
+    assert index.batches == 0
 
 
 @pytest.mark.parametrize("changes", [
@@ -170,6 +215,51 @@ def test_real_http_adapter_commits_registration_only_after_index_confirmation(se
     assert all(datetime.fromisoformat(point["payload"]["fetched_at"]) == document.fetched_at for point in points)
 
 
+def test_real_adapter_skips_healthy_sources_and_repairs_only_the_incomplete_source(sessions) -> None:
+    documents = [_document(), _document(PRODUCT_URL, 32)]
+    points: dict[str, dict] = {}
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.method == "GET":
+            return httpx.Response(200, json={"result": {"config": {"params": {
+                "vectors": {"size": DIMENSIONS, "distance": "Cosine"},
+            }}}})
+        body = json.loads(request.content)
+        if request.url.path.endswith("/points/scroll"):
+            assert body["with_vector"] is True and body["with_payload"] is True
+            source_id = body["filter"]["must"][0]["match"]["value"]
+            selected = [point for point in points.values() if point["payload"]["source_id"] == source_id]
+            return httpx.Response(200, json={"status": "ok", "result": {
+                "points": selected, "next_page_offset": None,
+            }})
+        if request.url.path == "/api/embed":
+            return httpx.Response(200, json={"embeddings": [[0.1] * DIMENSIONS for _ in body["input"]]})
+        points.update({point["id"]: point for point in body["points"]})
+        return httpx.Response(200, json={"status": "ok", "result": {"status": "completed"}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with sessions.begin() as db:
+            assert apply_import(db, documents, WebsiteIndexer(_settings(), client)).indexed_chunks == 3
+        calls.clear()
+        with sessions.begin() as db:
+            repeated = apply_import(db, documents, WebsiteIndexer(_settings(), client))
+        assert repeated.indexed_chunks == 0 and repeated.skipped_sources == 2 and repeated.skipped_chunks == 3
+        assert "/api/embed" not in calls
+        assert all(not path.endswith("/points") for path in calls)
+
+        missing = next(key for key, point in points.items() if point["payload"]["source_id"] == documents[0].source_id)
+        del points[missing]
+        calls.clear()
+        with sessions.begin() as db:
+            repaired = apply_import(db, documents, WebsiteIndexer(_settings(), client))
+        assert repaired.indexed_chunks == 2 and repaired.skipped_sources == 1 and repaired.skipped_chunks == 1
+        assert calls.count("/api/embed") == 1 and len(points) == 3
+    with sessions() as db:
+        assert len(authorized_points(db, "staff", list(points.values()))) == 3
+
+
 def test_partial_vector_failure_rolls_back_new_registration_and_orphans_are_ineligible(sessions) -> None:
     class PartialFailure(FakeIndex):
         def upsert_chunks(self, chunks: list[dict], authorization: dict[str, str]) -> None:
@@ -203,11 +293,17 @@ def test_cli_preview_apply_and_safe_failure_reports(sessions, tmp_path: Path, mo
 
     main(arguments)
     preview = json.loads(capsys.readouterr().out)
+    assert preview["step"] == 3 and preview["checkpoint"] == "3A"
     assert preview["status"] == "preview" and preview["new_sources"] == 1
     assert not index.checked
     main([*arguments, "--apply"])
     completed = json.loads(capsys.readouterr().out)
     assert completed["status"] == "completed" and completed["indexed_chunks"] == 2
+
+    main([*arguments, "--apply"])
+    skipped = json.loads(capsys.readouterr().out)
+    assert skipped["indexed_chunks"] == 0 and skipped["skipped_sources"] == 1
+    assert skipped["skipped_chunks"] == 2
 
     def unavailable(*_args, **_kwargs):
         raise IndexingError("Local embedding or vector service unavailable")

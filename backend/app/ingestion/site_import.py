@@ -4,7 +4,7 @@ This trusted local-operator path is limited to the already owner-authorized
 public Sardars site. It is not an authenticated upload API.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
 from sqlalchemy import or_, select
@@ -20,6 +20,7 @@ AUTHORIZATION_BASIS = "owner_authorized_site_for_internal_use"
 
 class WebsiteIndex(Protocol):
     def check_collection(self) -> None: ...
+    def source_is_current(self, chunks: list[dict], authorization_basis: str) -> bool: ...
     def upsert_chunks(self, chunks: list[dict], authorization: dict[str, str]) -> None: ...
 
 
@@ -31,6 +32,7 @@ class PlannedSource:
     fetched_at: str
     registration: Literal["new", "existing"]
     chunks: int
+    index_action: Literal["unchecked", "indexed", "skipped"] = "unchecked"
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,8 @@ class ImportResult:
     new_sources: int
     indexed_chunks: int
     sources: list[PlannedSource]
+    skipped_sources: int = 0
+    skipped_chunks: int = 0
 
 
 def plan_import(db: Session, documents: list[WebsiteDocument], *, lock: bool = False) -> ImportResult:
@@ -71,7 +75,7 @@ def plan_import(db: Session, documents: list[WebsiteDocument], *, lock: bool = F
             ):
                 raise ValueError("A selected source has conflicting identity or restricted visibility")
             if source.content_sha256 != document.content_sha256:
-                raise ValueError("A selected source has changed content; synchronization is Step 3")
+                raise ValueError("A selected source has changed content; updates are Step 3B")
         sources.append(PlannedSource(
             document.source_id, document.url, document.content_sha256,
             document.fetched_at.isoformat(), "existing" if source is not None else "new",
@@ -89,6 +93,22 @@ Existing rows are locked while writing to preserve permissions and checksums.
 """
     plan = plan_import(db, documents, lock=True)
     indexer.check_collection()
+    registrations = {
+        source.source_id: source.authorization_basis
+        for source in db.scalars(select(SourceRegistration).where(
+            SourceRegistration.source_id.in_([document.source_id for document in documents])
+        ))
+    }
+    all_chunks = prepare_chunks(documents)
+    to_index: list[dict] = []
+    sources: list[PlannedSource] = []
+    for source in plan.sources:
+        chunks = [chunk for chunk in all_chunks if chunk["source_id"] == source.source_id]
+        if source.registration == "existing" and indexer.source_is_current(chunks, registrations[source.source_id]):
+            sources.append(replace(source, index_action="skipped"))
+        else:
+            to_index.extend(chunks)
+            sources.append(replace(source, index_action="indexed"))
     for source in plan.sources:
         if source.registration == "new":
             document = next(document for document in documents if document.source_id == source.source_id)
@@ -98,15 +118,14 @@ Existing rows are locked while writing to preserve permissions and checksums.
                 content_sha256=document.content_sha256, is_active=True,
                 authorization_basis=AUTHORIZATION_BASIS,
             ))
+            registrations[document.source_id] = AUTHORIZATION_BASIS
     # Detect database constraints before creating vectors. These rows remain
     # uncommitted until the CLI's transaction context exits successfully.
     db.flush()
-    registrations = {
-        source.source_id: source.authorization_basis
-        for source in db.scalars(select(SourceRegistration).where(
-            SourceRegistration.source_id.in_([document.source_id for document in documents])
-        ))
-    }
-    chunks = prepare_chunks(documents)
-    indexer.upsert_chunks(chunks, registrations)
-    return ImportResult("completed", plan.new_sources, len(chunks), plan.sources)
+    if to_index:
+        indexer.upsert_chunks(to_index, registrations)
+    skipped = [source for source in sources if source.index_action == "skipped"]
+    return ImportResult(
+        "completed", plan.new_sources, len(to_index), sources,
+        len(skipped), sum(source.chunks for source in skipped),
+    )

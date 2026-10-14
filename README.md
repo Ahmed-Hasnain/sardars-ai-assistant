@@ -144,7 +144,7 @@ Apply the import:
 
     PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.import_site --input data/extracted/public_site_full.jsonl --url https://sardarandco.com/pages/about-us --url https://sardarandco.com/products/shower-niche-pakistan --apply
 
-Expect `status: completed`, `indexed_chunks: 3`, and normally `new_sources: 0` for the already registered seed. The importer checks the Qdrant collection schema, embeds at most eight chunks per request, validates vector counts/dimensions/numbers, and waits for completed upserts. An upsert inserts a new point or replaces the point with the same stable ID. Rerunning these exact inputs should keep the seed at three points; it still re-embeds them because unchanged-content skipping is a Step 3 feature. Different selected authorized website records may create new registrations and broaden retrieval coverage.
+The original Step 2 replay produced `status: completed`, `indexed_chunks: 3`, and `new_sources: 0` for the already registered seed. The Step 3A extension below now skips healthy indexed sources, so these same inputs normally produce `indexed_chunks: 0` and `skipped_chunks: 3`. The importer checks the Qdrant collection schema, embeds at most eight chunks per request when needed, validates vector counts/dimensions/numbers, and waits for completed upserts. An upsert inserts a new point or replaces the point with the same stable ID. Rerunning these exact inputs preserves the seed point IDs. Different selected authorized website records may create new registrations and broaden retrieval coverage.
 
 Verify the cited answer through the PostgreSQL-authorized retrieval path:
 
@@ -152,4 +152,44 @@ Verify the cited answer through the PostgreSQL-authorized retrieval path:
 
 Expect the direct brand answer and its About Us citation. File validation/registry conflicts fail before embedding, and an invalid collection fails before embeddings or writes. Disabled sources stay disabled, restricted visibility cannot be changed by this public-site importer, and changed source checksums are refused until synchronization is implemented. Existing authorization records are preserved; new registrations record the owner's site authorization rather than claiming an authenticated uploader identity.
 
-PostgreSQL and Qdrant do not share a transaction. New registrations commit only after index writes complete; failures roll them back and return a safe JSON error/nonzero exit code. A partial failure can leave unregistered vectors: retrieval excludes them, but they can consume candidate slots until later cleanup. The console result is not a persistent ingestion job record. Step 3 adds synchronization, unchanged-content skipping, cleanup, and durable failure/retry tracking. Live execution on the developer's running services is required before marking Step 2 verified end to end.
+PostgreSQL and Qdrant do not share a transaction. New registrations commit only after index writes complete; failures roll them back and return a safe JSON error/nonzero exit code. A partial failure can leave unregistered vectors: retrieval excludes them, but they can consume candidate slots until later cleanup. The console result is not a persistent ingestion job record. Step 2's existing-seed import and cited answer were verified by the developer screenshot on 2026-10-14. New-source creation remains tested offline; Step 3B/3C add updates/removals, cleanup, and durable failure/retry tracking.
+
+## Phase 5 learning checkpoint — Step 3A
+
+Step 3 is divided into 3A (skip unchanged indexed sources), 3B (changed/removed sources and cleanup), and 3C (persistent jobs and retries). The existing `import_site` command now implements 3A. No new dependency or migration is needed. Registry-only preview retains its read-only behavior and reports `index_action: unchecked`; applying the import also checks Qdrant before deciding to skip or index each source.
+
+Run the import/index tests:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_site_import.py backend/tests/test_site_index.py
+
+With the existing local stack running, repeat the same seed import:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.import_site --input data/extracted/public_site_full.jsonl --url https://sardarandco.com/pages/about-us --url https://sardarandco.com/products/shower-niche-pakistan --apply
+
+For the seed already written by Step 2, expect these fields:
+
+```json
+{
+  "phase": 5,
+  "step": 3,
+  "checkpoint": "3A",
+  "status": "completed",
+  "new_sources": 0,
+  "indexed_chunks": 0,
+  "skipped_sources": 2,
+  "skipped_chunks": 3
+}
+```
+
+Each source should report `index_action: skipped`. The command reads PostgreSQL and Qdrant but sends no embedding requests or vector writes for skipped sources. It should be much quicker than the developer's approximately 30-second Step 2 re-embedding run, although no precise latency target is established.
+
+A matching registry checksum alone is not enough to skip. The importer uses [Qdrant source-filtered scroll](https://api.qdrant.tech/api-reference/points/scroll-points), reads at most eight points/vectors per page under the existing response/time budgets, and verifies the complete expected ID set, source metadata, exact chunk text, approval basis, recorded embedding-model tag, and finite 1,024-dimensional vectors. A missing or mismatched expected chunk causes its document to be reindexed; healthy neighboring documents still skip. Malformed checks fail rather than silently skipping or falling through to a write. Extra/unexpected IDs require Step 3B cleanup and are refused before writes. Index checks validate stored vector shape/values and recorded model metadata; they do not regenerate embeddings or prove the model weights behind a mutable tag are unchanged.
+
+Skipped content retains its actual last indexed fetch timestamp. An unchanged checksum does not prove that changing business facts are current, and this saved-file command does not fetch the website again. Changed document checksums are still refused until 3B; removal, obsolete/orphan cleanup, and persistent jobs/retries are not implemented by 3A. Tests simulate missing/corrupt points without altering the live seed.
+
+Verify the cited answer and live regression baseline after the skip replay:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.rag.answer_seed "What is Bongio?"
+    PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.run_seed
+
+Expect the About Us citation and seven passing seed cases. This is still a two-document coverage baseline. Inspect the developer's 3A replay before moving to the update/removal checkpoint.

@@ -1,4 +1,4 @@
-"""Phase 5, Step 2: preview or apply a controlled saved-website import.
+"""Phase 5, Step 3A: import saved website records, skipping verified indexed content.
 
 Run as a trusted local operator with the project's database/service settings.
 Sources are limited to owner-authorized public Sardars descriptive URLs.
@@ -52,12 +52,15 @@ def main(argv: list[str] | None = None) -> None:
         error = str(exc)
     else:
         print(json.dumps({
-            "phase": 5, "step": 2, "collection": COLLECTION, "embedding_model": MODEL,
+            "phase": 5, "step": 3, "checkpoint": "3A",
+            "collection": COLLECTION, "embedding_model": MODEL,
             **asdict(result), "duration_ms": round((time.monotonic() - started) * 1000, 1),
         }, indent=2))
         return
 
-    print(json.dumps({"phase": 5, "step": 2, "status": "failed", "error": error}), file=sys.stderr)
+    print(json.dumps({
+        "phase": 5, "step": 3, "checkpoint": "3A", "status": "failed", "error": error,
+    }), file=sys.stderr)
     raise SystemExit(1)
 
 
