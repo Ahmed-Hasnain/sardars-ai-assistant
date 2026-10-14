@@ -103,3 +103,23 @@ Run the RAG baseline after starting Ollama and Qdrant and indexing the approved 
     PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.run_seed
 
 It checks five live questions: supported brand-list, Bongio definition, and storage answers against their source URLs, and uncited abstentions for missing return-policy and current-price facts. Two synthetic cases check prompt injection and conflicting warranty evidence without indexing either in Qdrant. The case file is `backend/app/evaluation/seed_cases.json`. The direct Bongio answer states only what the approved About Us source supports; it does not establish further facts about the brand. This small baseline does not establish general answer accuracy, adversarial robustness, or coverage of the full website.
+
+## Phase 5 learning checkpoint — Step 1
+
+Phase 5 is being built in small runnable checkpoints; `PLAN.md` records their sequence. Step 1 prepares selected website documents from an existing crawler JSONL file. It needs no PostgreSQL, Qdrant, Ollama, login, or network access. It validates record integrity, not factual accuracy, source permissions, or freshness. Only explicitly selected documents are validated; the rest of the bounded extraction file is scanned for selection, not imported.
+
+From the project root, preview the About Us document:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.prepare_site --input data/extracted/public_site_full.jsonl --url https://sardarandco.com/pages/about-us
+
+The saved 2026-10-12 extraction should produce one document and two chunks. `--url` can be repeated for up to ten unique URLs. Preview both existing seed documents and save their prepared chunks to a new local file:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.prepare_site --input data/extracted/public_site_full.jsonl --url https://sardarandco.com/pages/about-us --url https://sardarandco.com/products/shower-niche-pakistan --output data/extracted/phase5_prepared_chunks.jsonl
+
+Expect two documents and three chunks. Existing output files are refused rather than overwritten; omit `--output` to repeat a preview. The extracted text checksum and URL-derived source ID must match, timestamps must include a timezone, and selected records must use the current public crawler format. Identical duplicate records are deduplicated; conflicting records and missing requested URLs fail the preparation. Processing is limited to a 32 MiB input file, 5,000 lines, 256 KiB per line, 50,000 characters/10,000 words per selected document, and ten selected URLs.
+
+The output stays in the Git-ignored extraction directory. Its legacy `pending` label does not impose a per-document approval queue or authorize retrieval. This command does not register sources or change the chat index. The next checkpoint adds controlled registration and indexing; file uploads and PDF parsing are later Phase 5 work. If the full saved extraction is unavailable, `data/extracted/rag_seed.jsonl` can be used as the input for these same two URLs; extraction commands above explain how to recreate the local data.
+
+Run this checkpoint's focused tests:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_prepare_site.py

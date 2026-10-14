@@ -1,6 +1,6 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-13
+Last reviewed: 2026-10-14
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -170,6 +170,18 @@ Exit met for the two-document approved seed on 2026-10-13: the six evaluation ca
 ## Phase 5 — Real Sardars data and synchronization
 
 Goal: authorized website, catalogue, and structured product sources are usable and maintainable.
+
+Learning checkpoints (added 2026-10-14): implement and verify one checkpoint, let the developer run its command batch, and inspect the outcome before the next checkpoint. Keep the existing company-answer seed runnable throughout.
+
+| Step | Deliverable | Checkpoint acceptance | Status |
+| --- | --- | --- | --- |
+| 1 | Validated website import preparation | Explicitly select saved crawler records; validate URLs, identity, exact text checksums, timezone-aware fetch dates, and processing limits; preview or save chunks without accessing live services | Implemented and verified offline on 2026-10-14; developer replay next |
+| 2 | Controlled source registration and indexing | Import a selected authorized website source with preserved provenance, registry-enforced permissions, bounded embeddings, and an inspectable processing result | Next |
+| 3 | Source synchronization | Skip unchanged content; replace changed content and remove obsolete chunks; handle removal/disablement, processing failures, and safe retries without exposing stale evidence | Planned |
+| 4 | Authenticated URL and file ingestion | Authorized admin/staff can submit supported source formats through the API with local file storage, source visibility, bounded extraction, and processing status; add parsers as needed | Planned; upload screen belongs to frontend work |
+| 5 | Broader data coverage and evaluation | Import additional authorized descriptive sources in bounded batches; check extraction and answers; integrate structured product/variant records only once ownership, IDs, source priority, and freshness rules are defined | Planned; authoritative catalogue/price/stock decisions remain open |
+
+Step 1 reuses the 100-word/15-word-overlap chunker to isolate validation from later synchronization changes. It does not authorize or index sources, parse PDFs, or add an upload endpoint. The extractor's legacy `pending` field remains in prepared files; source authorization will be enforced separately when importing, with no per-document approval queue. These checkpoints divide the work; the Phase 5 exit criteria below still apply.
 
 - [ ] Register authorized source domains, uploads, and access scopes; confirm source priority and authoritative ownership for Shopify/company exports, internal documents, PDF catalogues, CSV/Excel lists, and later ERP/CRM sources. The supplied sitemap/site links and company profile are already approved for the internal prototype.
 - [ ] Add parsers only for approved formats actually needed (for example HTTPX/BeautifulSoup for HTML and PyMuPDF for PDFs).
