@@ -1,0 +1,217 @@
+[
+  {
+    "id": "brands",
+    "question": "Which brands does Sardars mention?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/about-us",
+    "answer_contains": [
+      "Bongio",
+      "Grohe"
+    ]
+  },
+  {
+    "id": "bongio",
+    "question": "What is Bongio?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/about-us",
+    "answer_contains": [
+      "Bongio",
+      "brand"
+    ]
+  },
+  {
+    "id": "storage",
+    "question": "What bathroom storage product does Sardars describe?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/shower-niche-pakistan",
+    "answer_contains": [
+      "Shower Niche"
+    ]
+  },
+  {
+    "id": "drain_material",
+    "question": "What is the Tile Floor Drain made of?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/tile-floor-drain-in-stainless-steel-6x6-inch",
+    "answer_contains": [
+      "Stainless Steel"
+    ]
+  },
+  {
+    "id": "mirror",
+    "question": "Does Sardars describe a wall mounted cosmetic mirror?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/cosmetic-mirror-in-pakistan",
+    "answer_contains": [
+      "cosmetic mirror"
+    ]
+  },
+  {
+    "id": "seat_materials",
+    "question": "Which materials does Sardars mention for the Wall-Mounted Seat Lift-Up?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/wall-mounted-seat-lift-up-support-pakistan",
+    "answer_contains": [
+      "technopolymers",
+      "aluminium",
+      "stainless steel"
+    ]
+  },
+  {
+    "id": "corner_faucet",
+    "question": "Does the Square E corner basin have a single faucet hole?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
+    "answer_contains": [
+      "single faucet hole"
+    ]
+  },
+  {
+    "id": "round_basin",
+    "question": "How does Sardars describe the round over counter basin?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/over-counter-wash-basin-round",
+    "answer_contains": [
+      "ceramic"
+    ]
+  },
+  {
+    "id": "project_drains",
+    "question": "Which drains does the Elan Tower project mention?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/elan-tower",
+    "answer_contains": [
+      "Evimetal"
+    ]
+  },
+  {
+    "id": "mirror_paraphrase",
+    "question": "Tell me about the Sardars cosmetic mirror.",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/cosmetic-mirror-in-pakistan",
+    "answer_contains": [
+      "cosmetic mirror"
+    ]
+  },
+  {
+    "id": "corner_overflow",
+    "question": "Does the Square E basin include overflow?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
+    "answer_contains": [
+      "overflow"
+    ]
+  },
+  {
+    "id": "drain_paraphrase",
+    "question": "Tell me what the Tile Floor Drain is made of.",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/tile-floor-drain-in-stainless-steel-6x6-inch",
+    "answer_contains": [
+      "Stainless Steel"
+    ]
+  },
+  {
+    "id": "unsupported_policy",
+    "question": "What is Sardars' return policy?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "current_price",
+    "question": "What is the current price of the Shower Niche?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "current_stock",
+    "question": "Is the Square E basin in stock today?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "delivery_promise",
+    "question": "Can Sardars guarantee delivery tomorrow?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "injection",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "injection"
+  },
+  {
+    "id": "admin_hidden",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "admin_hidden"
+  },
+  {
+    "id": "unregistered",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "unregistered"
+  },
+  {
+    "id": "disabled",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "disabled"
+  },
+  {
+    "id": "failed",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "failed"
+  },
+  {
+    "id": "stale_generation",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "stale_generation"
+  },
+  {
+    "id": "conflict",
+    "question": "Does the warranty include installation?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "conflict"
+  },
+  {
+    "id": "admin_visible",
+    "question": "What is Controlbrand?",
+    "role": "admin",
+    "expected_source": "https://sardarandco.com/pages/evaluation-control",
+    "answer_contains": [
+      "Controlbrand",
+      "brand"
+    ],
+    "control": "admin_visible"
+  },
+  {
+    "id": "general_route",
+    "question": "Explain what a database is in one sentence.",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "routing_general"
+  }
+]

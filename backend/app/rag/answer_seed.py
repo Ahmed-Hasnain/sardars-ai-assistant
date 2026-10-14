@@ -12,10 +12,13 @@ import sys
 from app.core.config import Settings
 from app.db.session import SessionLocal
 from app.ingestion.public_site import source_type
+from app.ingestion.documents import valid_source
+from app.rag.text_safety import contains_prompt_instruction as _contains_prompt_instruction
 from app.llm.base import ChatMessage, ChatModel
 from app.llm.ollama import OllamaChatModel
 from app.retrieval.search_seed import search_approved
 from app.retrieval.authorization import authorized_points
+from app.retrieval.limits import CANDIDATE_LIMIT
 
 
 FALLBACK = "I can't verify that from the available sources."
@@ -34,16 +37,13 @@ CHANGING_FACT_PATTERN = re.compile(
 BRAND_QUESTION_PATTERN = re.compile(r"^what is ([a-z][a-z0-9-]{1,60})\s*\??$", re.I)
 BRAND_MENTION_PATTERN = re.compile(r"\bbrands?\b", re.I)
 PREMIUM_BRAND_PATTERN = re.compile(r"\bpremium\s+brands?\b", re.I)
-PROMPT_INSTRUCTION_PATTERNS = (
-    re.compile(r"\b(?:ignore|disregard|override|forget)\b.{0,100}\b(?:instructions?|rules?|prompts?)\b", re.I),
-    re.compile(r"\b(?:reveal|leak|print|expose)\b.{0,100}\b(?:secrets?|passwords?|tokens?|system prompts?)\b", re.I),
-    re.compile(r"(?m)^\s*(?:system|developer|assistant)\s*:", re.I),
-)
+PRODUCT_DESCRIPTION_PATTERN = re.compile(r"\b(?:made of|materials?|construction|features?|includes?|offers?|offering|designed for|provides?|providing)\b", re.I)
 QUESTION_FILLER = {
     "a", "about", "an", "and", "are", "company", "do", "does", "for", "from",
     "how", "in", "is", "it", "mention", "mentions", "mentioned", "of", "product",
     "products", "describe", "describes", "described", "sardar", "sardars", "the",
     "their", "they", "to", "us", "what", "which", "who",
+    "tell", "me", "say", "says", "have", "has",
 }
 
 SYSTEM_PROMPT = (
@@ -84,15 +84,10 @@ class Evidence:
         return CitedSource(number, self.source_id, self.title, self.url, self.fetched_at)
 
 
-def _contains_prompt_instruction(text: str) -> bool:
-    """Reject obvious instructions in source text; this is not a complete detector."""
-    return any(pattern.search(text) for pattern in PROMPT_INSTRUCTION_PATTERNS)
-
-
 def _approved_excerpts(points: list[dict]) -> list[Evidence]:
-    """Keep only approved Sardars website chunks after source-policy filtering."""
+    """Keep approved descriptive chunks after source-policy filtering."""
     excerpts: list[Evidence] = []
-    for point in points[:3]:
+    for point in points[:CANDIDATE_LIMIT]:
         payload = point.get("payload", {})
         url = payload.get("url")
         title = payload.get("title")
@@ -104,7 +99,7 @@ def _approved_excerpts(points: list[dict]) -> list[Evidence]:
             or payload.get("review_status") != "approved"
             or payload.get("prototype_only") is not False
             or not isinstance(url, str)
-            or source_type(url) != payload.get("source_type")
+            or not valid_source(url, payload.get("source_type"))
             or not isinstance(title, str)
             or _contains_prompt_instruction(title)
             or not isinstance(source_id, str)
@@ -147,9 +142,18 @@ def _matching_sentences(
             if (
                 len(sentence) > MAX_SENTENCE_CHARS
                 or _contains_prompt_instruction(sentence)
-                or not required.issubset(_terms(sentence))
             ):
                 continue
+            if not required.issubset(_terms(sentence)):
+                # Product headings identify the subject, but at least one
+                # requested feature must come from the actual body sentence.
+                subject = _terms(excerpt.title)
+                features = required - subject
+                if (source_type(excerpt.url) != "products" or not features
+                    or not features.issubset(_terms(sentence))
+                    or not required.issubset(subject | _terms(sentence))):
+                    continue
+                sentence = f"{excerpt.title}: {sentence}"
             # A short descriptive sentence may depend on its preceding sentence
             # for the product name (for example, "Shower Niche" then "storage").
             if source_type(excerpt.url) == "products" and index and len(sentence) < 120:
@@ -169,7 +173,10 @@ def _matching_sentences(
 
     selected: list[Evidence] = []
     used_chars = 0
-    for match in sorted(matches, key=lambda item: len(item.text)):
+    for match in sorted(matches, key=lambda item: (
+        0 if source_type(item.url) == "products" and PRODUCT_DESCRIPTION_PATTERN.search(item.text) else 1,
+        len(item.text),
+    )):
         if len(selected) == 3:
             break
         cost = len(match.title) + len(match.text) + 32

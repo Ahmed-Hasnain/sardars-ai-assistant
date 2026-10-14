@@ -26,6 +26,46 @@ def _point() -> dict:
     }
 
 
+def test_product_heading_identifies_subject_but_body_must_support_requested_feature():
+    point = _point()
+    point["payload"].update(url="https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
+        source_type="products", title="Square E Corner Basin", text="The model includes a single faucet hole and overflow.")
+    model = AsyncMock()
+    model.chat.return_value = ChatResult(FALLBACK, "test-model", None, None, None)
+    result = asyncio.run(answer_from_points("Does the Square E corner basin have a single faucet hole?", [point], model))
+    assert "single faucet hole" in result.text and result.sources
+    assert "Square E Corner Basin" in result.text
+    unsupported = asyncio.run(answer_from_points("Does the Square E corner basin have automatic cleaning?", [point], model))
+    assert unsupported.text == FALLBACK and not unsupported.sources
+    assert model.chat.await_count == 1
+
+
+def test_subject_only_heading_does_not_make_unrelated_body_answerable():
+    point = _point()
+    point["payload"].update(url="https://sardarandco.com/products/shower-niche-pakistan", source_type="products",
+                            title="Shower Niche", text="Easy to clean.")
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points("Tell me about the Shower Niche.", [point], model))
+    assert result.text == FALLBACK and not result.sources
+    model.chat.assert_not_called()
+
+
+def test_later_authorized_candidate_can_supply_brand_evidence():
+    irrelevant = [{"payload": {**_point()["payload"], "text": "This unrelated sentence explains software interviews."}} for _ in range(5)]
+    result = asyncio.run(answer_from_points("What is Bongio?", irrelevant + [_point()], AsyncMock()))
+    assert "Bongio" in result.text and result.sources
+
+
+def test_product_material_description_precedes_title_heavy_vendor_prose():
+    point = _point()
+    point["payload"].update(url="https://sardarandco.com/products/over-counter-wash-basin-round", source_type="products",
+        title="Round Over Counter Basin", text="Round Over Counter Basin Art exists only for creativity. This round over counter basin offers durable ceramic construction.")
+    model = AsyncMock()
+    model.chat.return_value = ChatResult(FALLBACK, "test-model", None, None, None)
+    result = asyncio.run(answer_from_points("How does Sardars describe the round over counter basin?", [point], model))
+    assert "ceramic" in result.text and result.sources
+
+
 def test_answer_cites_the_used_source() -> None:
     model = AsyncMock()
     model.chat.return_value = ChatResult(

@@ -1,6 +1,7 @@
 from typing import Literal
+from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,3 +25,9 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:0.6b"
     ollama_timeout_seconds: float = 120.0
     ollama_keep_alive: int = 0
+
+    qdrant_base_url: str = "http://127.0.0.1:6333"
+    import_timeout_seconds: float = Field(default=300, gt=0, le=600)
+    embedding_batch_size: int = Field(default=2, ge=1, le=8)
+    ingestion_storage_dir: Path = Path("data/uploads")
+    ingestion_url_hosts: list[str] = ["sardarandco.com"]

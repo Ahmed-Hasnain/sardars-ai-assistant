@@ -1,0 +1,134 @@
+"""Durable job admission, bounded claims, fencing, and redacted status views."""
+
+from dataclasses import dataclass
+from contextlib import contextmanager
+from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.db.models import IngestionJob, SourceRegistration
+from app.ingestion.job_requests import JobRequest
+
+MAX_ATTEMPTS = 3
+
+
+@contextmanager
+def transaction(sessions: sessionmaker[Session]) -> Iterator[Session]:
+    with sessions.begin() as db:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(text("SET LOCAL lock_timeout = '5s'"))
+            db.execute(text("SET LOCAL statement_timeout = '10s'"))
+        yield db
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def utc(value: datetime) -> datetime:
+    # SQLite's test dialect omits timezone information on round-trip.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+@dataclass(frozen=True)
+class JobRun:
+    id: str
+    token: str
+    attempt: int
+    request: JobRequest
+
+
+def enqueue(sessions: sessionmaker[Session], request: JobRequest, *, submitted_by_user_id: int | None = None) -> str:
+    if request.scope == "internal" and submitted_by_user_id is None:
+        raise ValueError("Internal ingestion requires an authenticated submitter")
+    job_id = str(uuid4())
+    snapshot = request.snapshot()
+    # Validate the serialized form as well; a retry never trusts edited DB JSON.
+    JobRequest.model_validate(snapshot)
+    with transaction(sessions) as db:
+        db.add(IngestionJob(id=job_id, operation=request.operation, request=snapshot, status="pending", attempts=0, created_at=now(), submitted_by_user_id=submitted_by_user_id))
+    return job_id
+
+
+def claim(sessions: sessionmaker[Session], job_id: str, budget: float, *, retry: bool = False) -> JobRun:
+    exhausted = False
+    invalid = False
+    with transaction(sessions) as db:
+        job = db.scalar(select(IngestionJob).where(IngestionJob.id == job_id).with_for_update())
+        if job is None:
+            raise ValueError("Job not found")
+        expired = job.status == "processing" and job.lease_expires_at is not None and utc(job.lease_expires_at) <= now()
+        if job.status == "completed" or (job.status != "pending" and not retry) or (job.status == "processing" and not expired):
+            raise ValueError("Job cannot be claimed; retry only failed, pending, or expired jobs")
+        if job.attempts >= MAX_ATTEMPTS:
+            if expired:
+                job.status, job.error_code, job.error_message = "failed", "retry_limit", "Retry limit reached"
+                job.finished_at = now()
+                for source in db.scalars(select(SourceRegistration).where(SourceRegistration.index_job_id == job_id)):
+                    if source.index_status == "indexing":
+                        source.index_status = "failed"
+            exhausted = True
+        else:
+            try:
+                request = JobRequest.model_validate(job.request)
+                request.snapshot()
+                if request.operation != job.operation:
+                    raise ValueError("Operation mismatch")
+            except ValueError:
+                invalid = True
+                job.status, job.error_code, job.error_message = "failed", "invalid_snapshot", "Invalid stored source snapshot"
+                job.attempts += 1
+                job.finished_at = now()
+                for source in db.scalars(select(SourceRegistration).where(SourceRegistration.index_job_id == job_id)):
+                    if source.index_status == "indexing":
+                        source.index_status = "failed"
+            else:
+                token = str(uuid4())
+                job.status, job.run_token = "processing", token
+                job.attempts += 1
+                job.started_at, job.finished_at = now(), None
+                # Allows bounded socket teardown after the index processing budget.
+                job.lease_expires_at = now() + timedelta(seconds=2 * budget + 60)
+                job.error_code, job.error_message, job.result = None, None, None
+                run = JobRun(job.id, token, job.attempts, request)
+    if exhausted:
+        raise ValueError("Retry limit reached")
+    if invalid:
+        raise ValueError("Invalid stored source snapshot")
+    return run
+
+
+def require_run(db: Session, run: JobRun) -> IngestionJob:
+    job = db.scalar(select(IngestionJob).where(IngestionJob.id == run.id).with_for_update())
+    if (job is None or job.status != "processing" or job.run_token != run.token
+        or job.lease_expires_at is None or utc(job.lease_expires_at) <= now()):
+        raise ValueError("Job ownership expired or was replaced")
+    return job
+
+
+def fail(sessions: sessionmaker[Session], run: JobRun, code: str, message: str) -> None:
+    with transaction(sessions) as db:
+        job = db.scalar(select(IngestionJob).where(IngestionJob.id == run.id).with_for_update())
+        if job is None or job.run_token != run.token or job.status != "processing":
+            return
+        job.status, job.error_code, job.error_message = "failed", code, message
+        job.finished_at = now()
+        for source in db.scalars(select(SourceRegistration).where(SourceRegistration.index_job_id == run.id).with_for_update()):
+            if source.index_status == "indexing":
+                source.index_status = "failed"
+
+
+def job_view(job: IngestionJob) -> dict:
+    """Never return snapshots/document text, credentials, or worker tokens."""
+    return {
+        "job_id": job.id, "operation": job.operation, "status": job.status,
+        "attempts": job.attempts, "max_attempts": MAX_ATTEMPTS,
+        "created_at": utc(job.created_at).isoformat(),
+        "started_at": utc(job.started_at).isoformat() if job.started_at else None,
+        "finished_at": utc(job.finished_at).isoformat() if job.finished_at else None,
+        "lease_expired": bool(job.status == "processing" and job.lease_expires_at and utc(job.lease_expires_at) <= now()),
+        "error_code": job.error_code, "error": job.error_message, "result": job.result,
+    }
