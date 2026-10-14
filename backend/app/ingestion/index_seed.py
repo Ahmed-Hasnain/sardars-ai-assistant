@@ -36,6 +36,8 @@ def main() -> None:
         if any(
             (source := registrations.get(chunk["source_id"])) is None
             or not source.is_active
+            or source.index_status != "ready"
+            or source.index_generation is not None
             or source.visibility != "public"
             or source.url != chunk["url"]
             or source.source_type != chunk["source_type"]

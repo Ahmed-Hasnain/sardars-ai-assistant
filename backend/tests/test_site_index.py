@@ -224,7 +224,7 @@ def test_partial_or_empty_index_is_not_considered_current(points: list[dict]) ->
 
 def test_unexpected_extra_points_are_refused_until_cleanup_checkpoint() -> None:
     handler = lambda _request: httpx.Response(200, json=_scroll([_point(_chunk()), _point(_chunk(1))]))
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(IndexingError, match="Step 3B"):
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(IndexingError, match="cleanup"):
         WebsiteIndexer(_settings(), client).source_is_current([_chunk()], "test_authorization")
 
 
@@ -248,3 +248,50 @@ def test_index_pagination_cannot_repeat_offsets() -> None:
     handler = lambda _request: httpx.Response(200, json=next(responses))
     with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(IndexingError, match="pagination"):
         WebsiteIndexer(_settings(), client).source_is_current([_chunk(), _chunk(1), _chunk(2)], "test_authorization")
+
+
+def test_cleanup_snapshots_only_validated_source_ids_and_waits_for_bounded_deletions() -> None:
+    calls = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if request.url.path.endswith("/scroll"):
+            assert body["with_payload"] == ["source_id"] and body["with_vector"] is False
+            return httpx.Response(200, json=_scroll([
+                {"id": "one", "payload": {"source_id": "a" * 64}},
+                {"id": 2, "payload": {"source_id": "a" * 64}},
+            ]))
+        assert request.url.path.endswith("/delete") and request.url.params["wait"] == "true"
+        return httpx.Response(200, json={"status": "ok", "result": {"status": "completed"}})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        index = WebsiteIndexer(_settings(), client)
+        assert index.source_point_ids("a" * 64) == ["one", 2]
+        index.delete_points(list(range(65)))
+    assert [len(body["points"]) for body in calls if "points" in body] == [64, 1]
+
+
+@pytest.mark.parametrize("points", [
+    [{"id": "other", "payload": {"source_id": "other_source"}}],
+    [{"id": "missing_payload"}], [{"id": True, "payload": {"source_id": "a" * 64}}],
+    [{"id": "one", "payload": {"source_id": "a" * 64}}] * 2,
+])
+def test_cleanup_rejects_wrong_source_or_malformed_points(points: list[dict]) -> None:
+    handler = lambda _request: httpx.Response(200, json=_scroll(points))
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(IndexingError):
+        WebsiteIndexer(_settings(), client).source_point_ids("a" * 64)
+
+
+def test_cleanup_limit_and_completion_confirmation_are_enforced(monkeypatch) -> None:
+    monkeypatch.setattr("app.ingestion.site_index.MAX_CLEANUP_POINTS", 1)
+    handler = lambda _request: httpx.Response(200, json=_scroll([
+        {"id": "one", "payload": {"source_id": "a" * 64}},
+        {"id": "two", "payload": {"source_id": "a" * 64}},
+    ]))
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(IndexingError, match="limit"):
+            WebsiteIndexer(_settings(), client).source_point_ids("a" * 64)
+        with pytest.raises(IndexingError, match="limit"):
+            WebsiteIndexer(_settings(), client).delete_points(["one", "two"])
+    handler = lambda _request: httpx.Response(200, json={"status": "ok", "result": {"status": "acknowledged"}})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(IndexingError, match="completion"):
+        WebsiteIndexer(_settings(), client).delete_points(["one"])

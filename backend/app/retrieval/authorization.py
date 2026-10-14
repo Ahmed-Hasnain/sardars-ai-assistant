@@ -48,6 +48,8 @@ def authorized_points(db: Session, role: str, points: list[dict]) -> list[dict]:
         if (
             source is None
             or not source.is_active
+            or source.index_status != "ready"
+            or (source.index_generation is not None and source.index_generation != payload.get("index_generation"))
             or source.visibility not in allowed
             or source.visibility != payload.get("visibility")
             or source.url != url

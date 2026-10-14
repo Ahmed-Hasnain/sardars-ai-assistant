@@ -14,10 +14,16 @@ from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 EMBEDDING_BATCH_SIZE = 8
 INDEX_CHECK_BATCH_SIZE = 8
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_CLEANUP_POINTS = 2_000
+CLEANUP_BATCH_SIZE = 64
 
 
 class IndexingError(RuntimeError):
     """Safe import failure without raw service responses or document text."""
+
+
+class UnexpectedChunks(IndexingError):
+    pass
 
 
 def _finite_number(value: object) -> bool:
@@ -108,7 +114,7 @@ class WebsiteIndexer:
         if not matches:
             raise IndexingError("Qdrant collection must use the recorded 1024-dimensional cosine schema")
 
-    def source_is_current(self, chunks: list[dict], authorization_basis: str) -> bool:
+    def source_is_current(self, chunks: list[dict], authorization_basis: str, *, generation: str | None = None) -> bool:
         """Check every expected point and vector, with bounded source pagination.
 
 Read by source ID without approval filtering so inconsistent or extra points
@@ -130,6 +136,8 @@ cannot disappear from the completeness check. Never search semantically here.
             }
             if offset is not None:
                 query["offset"] = offset
+            if generation is not None:
+                query["filter"]["must"].append({"key": "index_generation", "match": {"value": generation}})
             body = self._request(
                 "POST", f"{self.settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll",
                 json=query,
@@ -146,7 +154,7 @@ cannot disappear from the completeness check. Never search semantically here.
                     raise IndexingError("Qdrant returned an invalid index-check point")
                 point_id = point["id"]
                 if point_id not in expected:
-                    raise IndexingError("Source has unexpected chunks; cleanup is Step 3B")
+                    raise UnexpectedChunks("Source has unexpected chunks; cleanup is required")
                 if point_id in points:
                     raise IndexingError("Qdrant repeated a point during the index check")
                 points[point_id] = point
@@ -160,6 +168,52 @@ cannot disappear from the completeness check. Never search semantically here.
             _point_matches(points[point_id], chunk, authorization_basis)
             for point_id, chunk in expected.items()
         )
+
+    def source_point_ids(self, source_id: str) -> list[str | int]:
+        """Snapshot only the selected source's IDs for bounded cleanup."""
+        ids: list[str | int] = []
+        seen: set[str | int] = set()
+        offsets: set[str | int] = set()
+        offset = None
+        while True:
+            query = {
+                "filter": {"must": [{"key": "source_id", "match": {"value": source_id}}]},
+                "limit": CLEANUP_BATCH_SIZE, "with_payload": ["source_id"], "with_vector": False,
+            }
+            if offset is not None:
+                query["offset"] = offset
+            body = self._request("POST", f"{self.settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll", json=query)
+            result = body.get("result")
+            if (body.get("status") != "ok" or not isinstance(result, dict)
+                or not isinstance(result.get("points"), list) or "next_page_offset" not in result
+                or len(result["points"]) > CLEANUP_BATCH_SIZE):
+                raise IndexingError("Invalid cleanup scan response")
+            for point in result["points"]:
+                if (not isinstance(point, dict) or type(point.get("id")) not in (str, int) or point["id"] in seen
+                    or not isinstance(point.get("payload"), dict) or point["payload"].get("source_id") != source_id):
+                    raise IndexingError("Invalid or repeated cleanup point")
+                seen.add(point["id"])
+                ids.append(point["id"])
+                if len(ids) > MAX_CLEANUP_POINTS:
+                    raise IndexingError("Source exceeds the cleanup point limit")
+            offset = result["next_page_offset"]
+            if offset is None:
+                return ids
+            if type(offset) not in (str, int) or offset in offsets or not result["points"]:
+                raise IndexingError("Invalid cleanup pagination")
+            offsets.add(offset)
+
+    def delete_points(self, ids: list[str | int]) -> None:
+        if len(ids) > MAX_CLEANUP_POINTS:
+            raise IndexingError("Deletion exceeds the cleanup point limit")
+        for start in range(0, len(ids), CLEANUP_BATCH_SIZE):
+            body = self._request(
+                "POST", f"{self.settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/delete",
+                params={"wait": "true"}, json={"points": ids[start:start + CLEANUP_BATCH_SIZE]},
+            )
+            if (body.get("status") != "ok" or not isinstance(body.get("result"), dict)
+                or body["result"].get("status") != "completed"):
+                raise IndexingError("Qdrant did not confirm completion of cleanup")
 
     def upsert_chunks(self, chunks: list[dict], authorization: dict[str, str]) -> None:
         """Caller supplies registry-checked chunks and their authorization basis."""

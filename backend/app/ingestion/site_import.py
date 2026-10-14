@@ -68,6 +68,8 @@ def plan_import(db: Session, documents: list[WebsiteDocument], *, lock: bool = F
         if source is not None:
             if not source.is_active:
                 raise ValueError("A selected source is disabled; import will not reactivate it")
+            if source.index_status != "ready" or source.index_generation is not None:
+                raise ValueError("Use the durable import workflow for this source")
             if (
                 source.source_id != document.source_id or source.url != document.url
                 or source.source_type != document.source_type

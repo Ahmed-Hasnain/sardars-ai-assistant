@@ -27,6 +27,15 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    supplied = config.attributes.get("connection")
+    if supplied is not None:
+        context.configure(
+            connection=supplied, target_metadata=target_metadata,
+            version_table_schema=config.attributes.get("version_table_schema"),
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+        return
     with engine.connect() as connection:
         context.configure(
             connection=connection,

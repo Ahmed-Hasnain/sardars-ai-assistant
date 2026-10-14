@@ -66,6 +66,7 @@ def _register(sessions, document: WebsiteDocument, **changes: object) -> None:
 
 class FakeIndex:
     def __init__(self):
+        self.settings = _settings()
         self.checked = False
         self.points: dict[str, dict] = {}
         self.batches = 0
@@ -73,13 +74,20 @@ class FakeIndex:
     def check_collection(self) -> None:
         self.checked = True
 
-    def source_is_current(self, chunks: list[dict], authorization_basis: str) -> bool:
+    def source_is_current(self, chunks: list[dict], authorization_basis: str, *, generation: str | None = None) -> bool:
         return all(
             chunk["id"] in self.points
             and self.points[chunk["id"]]["payload"]["text"] == chunk["text"]
             and self.points[chunk["id"]]["payload"]["content_sha256"] == chunk["content_sha256"]
             for chunk in chunks
         )
+
+    def source_point_ids(self, source_id: str) -> list[str]:
+        return [key for key, point in self.points.items() if point["payload"]["source_id"] == source_id]
+
+    def delete_points(self, ids: list[str | int]) -> None:
+        for point_id in ids:
+            self.points.pop(point_id, None)
 
     def upsert_chunks(self, chunks: list[dict], authorization: dict[str, str]) -> None:
         self.batches += 1
@@ -293,7 +301,7 @@ def test_cli_preview_apply_and_safe_failure_reports(sessions, tmp_path: Path, mo
 
     main(arguments)
     preview = json.loads(capsys.readouterr().out)
-    assert preview["step"] == 3 and preview["checkpoint"] == "3A"
+    assert preview["step"] == 3 and preview["checkpoint"] == "3B/3C"
     assert preview["status"] == "preview" and preview["new_sources"] == 1
     assert not index.checked
     main([*arguments, "--apply"])
