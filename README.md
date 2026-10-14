@@ -123,3 +123,33 @@ The output stays in the Git-ignored extraction directory. Its legacy `pending` l
 Run this checkpoint's focused tests:
 
     PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_prepare_site.py
+
+## Phase 5 learning checkpoint — Step 2
+
+Step 2 adds a controlled import for the already owner-authorized public Sardars site. Run it as a trusted local operator with the project's `.env` and local-service access; it is not an authenticated upload endpoint. It revalidates the original extraction file and regenerates the same chunks as Step 1 so that whole-document checksums can be checked before writing. The saved prepared chunk file remains an inspectable staging artifact, not an authority for permissions or content integrity.
+
+Start the development stack with `./scripts/dev.sh` in another terminal if it is stopped. Keep that terminal open. This starts the database, Qdrant, Ollama, and API and applies existing migrations. No new migration or dependency is needed for Step 2. The recorded Qdrant collection and embedding model must already exist as described above. `SARDARS_QDRANT_BASE_URL` defaults to localhost port 6333; `SARDARS_IMPORT_TIMEOUT_SECONDS` defaults to 300 seconds (maximum 600). Ingestion and retrieval share the recorded model/collection schema and service URLs.
+
+Run the new tests from the project root:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_site_import.py backend/tests/test_site_index.py
+
+Preview the registry checks for the same two documents:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.import_site --input data/extracted/public_site_full.jsonl --url https://sardarandco.com/pages/about-us --url https://sardarandco.com/products/shower-niche-pakistan
+
+This reads PostgreSQL but makes no registrations, model calls, or vector writes. The JSON result should have `status: preview`, `indexed_chunks: 0`, and source chunk counts of two and one. On the existing seed database, `new_sources` should be zero and both registrations should say `existing`.
+
+Apply the import:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.import_site --input data/extracted/public_site_full.jsonl --url https://sardarandco.com/pages/about-us --url https://sardarandco.com/products/shower-niche-pakistan --apply
+
+Expect `status: completed`, `indexed_chunks: 3`, and normally `new_sources: 0` for the already registered seed. The importer checks the Qdrant collection schema, embeds at most eight chunks per request, validates vector counts/dimensions/numbers, and waits for completed upserts. An upsert inserts a new point or replaces the point with the same stable ID. Rerunning these exact inputs should keep the seed at three points; it still re-embeds them because unchanged-content skipping is a Step 3 feature. Different selected authorized website records may create new registrations and broaden retrieval coverage.
+
+Verify the cited answer through the PostgreSQL-authorized retrieval path:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.rag.answer_seed "What is Bongio?"
+
+Expect the direct brand answer and its About Us citation. File validation/registry conflicts fail before embedding, and an invalid collection fails before embeddings or writes. Disabled sources stay disabled, restricted visibility cannot be changed by this public-site importer, and changed source checksums are refused until synchronization is implemented. Existing authorization records are preserved; new registrations record the owner's site authorization rather than claiming an authenticated uploader identity.
+
+PostgreSQL and Qdrant do not share a transaction. New registrations commit only after index writes complete; failures roll them back and return a safe JSON error/nonzero exit code. A partial failure can leave unregistered vectors: retrieval excludes them, but they can consume candidate slots until later cleanup. The console result is not a persistent ingestion job record. Step 3 adds synchronization, unchanged-content skipping, cleanup, and durable failure/retry tracking. Live execution on the developer's running services is required before marking Step 2 verified end to end.

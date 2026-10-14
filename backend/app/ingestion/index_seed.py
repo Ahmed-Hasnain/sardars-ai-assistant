@@ -7,10 +7,10 @@ from sqlalchemy import select
 
 from app.db.models import SourceRegistration
 from app.db.session import SessionLocal
+from app.core.config import Settings
+from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 
 CHUNKS_FILE = Path("data/extracted/rag_seed_chunks.jsonl")
-MODEL = "qwen3-embedding:0.6b"
-COLLECTION = "sardars_public_qwen3_embedding_06b_v1"
 
 
 def main() -> None:
@@ -44,9 +44,10 @@ def main() -> None:
         ):
             raise ValueError("Register the active seed sources before indexing")
 
-    with httpx.Client(timeout=120) as client:
+    settings = Settings()
+    with httpx.Client(timeout=settings.ollama_timeout_seconds) as client:
         response = client.post(
-            "http://127.0.0.1:11434/api/embed",
+            f"{settings.ollama_base_url.rstrip('/')}/api/embed",
             json={
                 "model": MODEL,
                 "input": [chunk["text"] for chunk in chunks],
@@ -56,7 +57,7 @@ def main() -> None:
         response.raise_for_status()
         vectors = response.json()["embeddings"]
 
-        if len(vectors) != len(chunks) or any(len(vector) != 1024 for vector in vectors):
+        if len(vectors) != len(chunks) or any(len(vector) != DIMENSIONS for vector in vectors):
             raise ValueError("Unexpected embedding count or dimensions")
 
         points = [
@@ -79,7 +80,7 @@ def main() -> None:
         ]
 
         response = client.put(
-            f"http://127.0.0.1:6333/collections/{COLLECTION}/points",
+            f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points",
             params={"wait": "true"},
             json={"points": points},
         )

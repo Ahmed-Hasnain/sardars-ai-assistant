@@ -2,7 +2,8 @@ import sys
 
 import httpx
 
-from app.ingestion.index_seed import COLLECTION, MODEL
+from app.core.config import Settings
+from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 from app.retrieval.authorization import ALLOWED_VISIBILITIES
 
 
@@ -10,7 +11,8 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
     if not question.strip():
         raise ValueError("Question cannot be blank")
 
-    with httpx.Client(timeout=120) as client:
+    settings = Settings()
+    with httpx.Client(timeout=settings.ollama_timeout_seconds) as client:
         point_filter: dict = {"must": conditions}
         if visibility is not None:
             point_filter["should"] = [
@@ -18,17 +20,17 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
                 for value in sorted(visibility)
             ]
         response = client.post(
-            "http://127.0.0.1:11434/api/embed",
+            f"{settings.ollama_base_url.rstrip('/')}/api/embed",
             json={"model": MODEL, "input": question, "truncate": False},
         )
         response.raise_for_status()
         vector = response.json()["embeddings"][0]
 
-        if len(vector) != 1024:
+        if len(vector) != DIMENSIONS:
             raise ValueError("Unexpected query embedding dimensions")
 
         response = client.post(
-            f"http://127.0.0.1:6333/collections/{COLLECTION}/points/query",
+            f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/query",
             json={
                 "query": vector,
                 "filter": point_filter,

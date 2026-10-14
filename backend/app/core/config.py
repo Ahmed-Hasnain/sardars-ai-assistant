@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,3 +24,6 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:0.6b"
     ollama_timeout_seconds: float = 120.0
     ollama_keep_alive: int = 0
+
+    qdrant_base_url: str = "http://127.0.0.1:6333"
+    import_timeout_seconds: float = Field(default=300, gt=0, le=600)
