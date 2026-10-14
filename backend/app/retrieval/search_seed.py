@@ -5,6 +5,7 @@ import httpx
 from app.core.config import Settings
 from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 from app.retrieval.authorization import ALLOWED_VISIBILITIES
+from app.retrieval.limits import CANDIDATE_LIMIT
 
 
 def _query(question: str, conditions: list[dict], visibility: set[str] | None = None) -> list[dict]:
@@ -34,7 +35,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
             json={
                 "query": vector,
                 "filter": point_filter,
-                "limit": 3,
+                "limit": CANDIDATE_LIMIT,
                 "with_payload": True,
                 "with_vector": False,
             },

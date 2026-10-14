@@ -1,0 +1,45 @@
+{
+  "name": "public_site_v1",
+  "sources": [
+    {
+      "url": "https://sardarandco.com/pages/about-us",
+      "content_sha256": "4fb889de61a6f8655c49b0aa05c28c14f68fbc43d271d3c05df6fb084a163795",
+      "purpose": "Existing company and brand baseline"
+    },
+    {
+      "url": "https://sardarandco.com/products/shower-niche-pakistan",
+      "content_sha256": "dedc4a6cbfa27242683ce671273a152bd7b5a119f5bfab88bc177ef7c56f7ed3",
+      "purpose": "Existing bathroom storage baseline"
+    },
+    {
+      "url": "https://sardarandco.com/products/cosmetic-mirror-in-pakistan",
+      "content_sha256": "e7fb41d0c17efb8d16ab683404f8a7d5e922eb5fdac210f34f6121bfe7ebe83a",
+      "purpose": "Bathroom accessory description"
+    },
+    {
+      "url": "https://sardarandco.com/products/wall-mounted-seat-lift-up-support-pakistan",
+      "content_sha256": "cff37da10d602e993dbf8aee0e4c6ee1374fdd6cf99dc492cf12ccdda6146a30",
+      "purpose": "Accessibility fitting materials and folding description"
+    },
+    {
+      "url": "https://sardarandco.com/products/tile-floor-drain-in-stainless-steel-6x6-inch",
+      "content_sha256": "e0fe8df54c1fafbfaf95487d9494e9fa1d518459d831ca5511a922940aa5f5a8",
+      "purpose": "Drain material and installation description"
+    },
+    {
+      "url": "https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
+      "content_sha256": "de7536b12f3a95b47329211ddbf21ab01f2c0a9ccf06c6f8ca2d27f7f49fbb22",
+      "purpose": "Corner basin and faucet-hole description"
+    },
+    {
+      "url": "https://sardarandco.com/products/over-counter-wash-basin-round",
+      "content_sha256": "c5e14872293f106c76af9604e89b4956cbdbe2f93441190aeb3343b98ba6d377",
+      "purpose": "Round basin descriptive material"
+    },
+    {
+      "url": "https://sardarandco.com/pages/elan-tower",
+      "content_sha256": "5f52c12d6713b2fcfb600db9875dc043b724cb20b6621751fa8a6a84cd353b27",
+      "purpose": "Company project and supplied fittings description"
+    }
+  ]
+}
