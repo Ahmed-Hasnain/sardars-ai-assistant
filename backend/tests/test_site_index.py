@@ -15,6 +15,7 @@ def _settings() -> Settings:
     return Settings(
         _env_file=None, db_user="test", db_name="test", db_password="test",
         ollama_base_url="http://embedding.local:11434", qdrant_base_url="http://vectors.local:6333",
+        embedding_batch_size=EMBEDDING_BATCH_SIZE,
     )
 
 
@@ -122,6 +123,54 @@ def test_network_failures_hide_service_details(mode: str) -> None:
     with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(IndexingError) as error:
         WebsiteIndexer(_settings(), client).check_collection()
     assert "SECRET" not in str(error.value)
+
+
+@pytest.mark.parametrize("service,error_kind,expected", [
+    ("embedding", "timeout", "Embedding service request timed out"),
+    ("vector", "timeout", "Vector service request timed out"),
+    ("embedding", "status", "Embedding service returned HTTP 400"),
+    ("vector", "connect", "Vector service unavailable"),
+])
+def test_service_errors_identify_failure_without_exposing_response(service, error_kind, expected):
+    def handler(request):
+        if error_kind == "timeout":
+            raise httpx.ReadTimeout("PRIVATE_DETAIL", request=request)
+        if error_kind == "connect":
+            raise httpx.ConnectError("PRIVATE_DETAIL", request=request)
+        return httpx.Response(400, text="PRIVATE_DOCUMENT_TEXT")
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        indexer = WebsiteIndexer(_settings(), client)
+        url = "http://embedding.local/api/embed" if service == "embedding" else "http://vectors.local/collections/test"
+        with pytest.raises(IndexingError) as error:
+            indexer._request("POST", url)
+    assert str(error.value) == expected
+
+
+def test_total_budget_timeout_is_distinct_from_service_timeout(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("app.ingestion.site_index.time.monotonic", lambda: clock[0])
+    def handler(request):
+        clock[0] = 301
+        raise httpx.ReadTimeout("PRIVATE_DETAIL", request=request)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        indexer = WebsiteIndexer(_settings(), client)
+        with pytest.raises(IndexingError, match="processing time budget"):
+            indexer.check_collection()
+
+
+def test_default_small_embedding_batches_confirm_each_write():
+    settings = Settings(_env_file=None, db_user="test", db_name="test", db_password="test")
+    embedded, written = [], []
+    def handler(request):
+        body = json.loads(request.content)
+        if request.url.path == "/api/embed":
+            embedded.append(len(body["input"]))
+            return httpx.Response(200, json={"embeddings": [[0.1] * DIMENSIONS for _ in body["input"]]})
+        written.append(len(body["points"]))
+        return httpx.Response(200, json={"status":"ok", "result":{"status":"completed"}})
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        WebsiteIndexer(settings, client).upsert_chunks([_chunk(index) for index in range(5)], {"a" * 64: "test"})
+    assert embedded == written == [2, 2, 1]
 
 
 def test_seed_retrieval_uses_the_same_configured_services_and_collection(monkeypatch) -> None:

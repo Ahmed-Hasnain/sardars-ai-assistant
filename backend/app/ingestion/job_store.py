@@ -41,13 +41,15 @@ class JobRun:
     request: JobRequest
 
 
-def enqueue(sessions: sessionmaker[Session], request: JobRequest) -> str:
+def enqueue(sessions: sessionmaker[Session], request: JobRequest, *, submitted_by_user_id: int | None = None) -> str:
+    if request.scope == "internal" and submitted_by_user_id is None:
+        raise ValueError("Internal ingestion requires an authenticated submitter")
     job_id = str(uuid4())
     snapshot = request.snapshot()
     # Validate the serialized form as well; a retry never trusts edited DB JSON.
     JobRequest.model_validate(snapshot)
     with transaction(sessions) as db:
-        db.add(IngestionJob(id=job_id, operation=request.operation, request=snapshot, status="pending", attempts=0, created_at=now()))
+        db.add(IngestionJob(id=job_id, operation=request.operation, request=snapshot, status="pending", attempts=0, created_at=now(), submitted_by_user_id=submitted_by_user_id))
     return job_id
 
 

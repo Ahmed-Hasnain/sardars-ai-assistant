@@ -9,6 +9,8 @@ from app.db.models import IngestionJob, SourceRegistration
 from app.ingestion.job_requests import JobRequest, generation_chunks, source_id
 from app.ingestion.job_store import JobRun, now, require_run, transaction, utc
 from app.ingestion.public_site import source_type
+from app.ingestion.access import actor, check_submission
+from app.ingestion.documents import valid_source
 from app.ingestion.site_import import AUTHORIZATION_BASIS
 from app.ingestion.site_index import IndexingError, UnexpectedChunks, WebsiteIndexer
 
@@ -22,9 +24,10 @@ class SourceWork:
     chunks: list[dict]
     generation: str | None
     registration: str
+    visibility: str = "public"
 
 
-def source_record(db: Session, url: str, *, lock: bool = False) -> SourceRegistration | None:
+def source_record(db: Session, url: str, *, lock: bool = False, internal: bool = False) -> SourceRegistration | None:
     query = select(SourceRegistration).where(or_(SourceRegistration.source_id == source_id(url), SourceRegistration.url == url))
     if lock:
         query = query.with_for_update()
@@ -33,7 +36,8 @@ def source_record(db: Session, url: str, *, lock: bool = False) -> SourceRegistr
         raise ValueError("Conflicting source registrations")
     source = rows[0] if rows else None
     if source and (source.source_id != source_id(url) or source.url != url
-                   or source.source_type != source_type(url) or source.visibility != "public"):
+                   or (not internal and (source.source_type != source_type(url) or source.visibility != "public"))
+                   or (internal and not valid_source(url, source.source_type))):
         raise ValueError("Source identity or visibility conflicts with this public-site workflow")
     return source
 
@@ -73,13 +77,20 @@ def stage(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer)
     documents = {document.url: document for document in run.request.documents}
     with transaction(sessions) as db:
         job = require_run(db, run)
+        user = actor(db, job) if run.request.scope == "internal" else None
         # Stable locking order across overlapping batches.
         for url in sorted(run.request.source_urls()):
-            source = source_record(db, url, lock=True)
+            source = source_record(db, url, lock=True, internal=run.request.scope == "internal")
             check_available(db, source, run.id)
             document = documents.get(url)
+            if user is not None:
+                if document is None and source is None:
+                    raise ValueError("Source not found")
+                check_submission(user, source, document.visibility if document else None)
+                if document and source and document.source_type != source.source_type:
+                    raise ValueError("Source format cannot change during an update")
             registration = "new" if source is None else "existing"
-            basis = source.authorization_basis if source else AUTHORIZATION_BASIS
+            basis = source.authorization_basis if source else "authenticated_internal_submission" if user else AUTHORIZATION_BASIS
             if document:
                 if source and not source.is_active:
                     raise ValueError("Source is disabled; import cannot reactivate it")
@@ -96,9 +107,16 @@ def stage(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer)
                 action = "check" if check else "indexed"
                 if source is None:
                     source = SourceRegistration(source_id=document.source_id, url=url, source_type=document.source_type,
-                                                visibility="public", is_active=True, authorization_basis=basis,
+                                                visibility=document.visibility, is_active=True, authorization_basis=basis,
+                                                registered_by_user_id=user.id if user else None,
                                                 content_sha256=document.content_sha256)
                     db.add(source)
+                source.title = document.title
+                if user is not None:
+                    source.storage_key = str(document.storage_key)
+                    source.original_filename = document.original_filename
+                    source.media_type = document.media_type
+                    source.file_sha256 = document.file_sha256
                 source.content_sha256, source.fetched_at = document.content_sha256, document.fetched_at
                 source.index_generation = generation
                 source.index_status = "indexing"
@@ -108,7 +126,7 @@ def stage(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer)
                     source.is_active, source.index_status = False, "removed"
             if source:
                 source.index_job_id = run.id
-            work.append(SourceWork(source_id(url), url, basis, action, chunks, generation, registration))
+            work.append(SourceWork(source_id(url), url, basis, action, chunks, generation, registration, source.visibility if source else "public"))
         job.result = {"sources": [{"source_id": item.source_id, "url": item.url, "index_action": item.action} for item in work]}
     # This commit is the retrieval barrier: indexing/removed sources are now hidden.
     return work
@@ -116,18 +134,21 @@ def stage(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer)
 
 def check_ownership(sessions: sessionmaker[Session], run: JobRun, work: list[SourceWork]) -> None:
     with transaction(sessions) as db:
-        require_run(db, run)
+        job = require_run(db, run)
+        user = actor(db, job) if run.request.scope == "internal" else None
         for item in work:
-            source = source_record(db, item.url, lock=True)
+            source = source_record(db, item.url, lock=True, internal=run.request.scope == "internal")
             if source is None:
                 if item.action != "removed":
                     raise ValueError("Source disappeared during processing")
-            elif (source.index_job_id != run.id or (item.action != "removed" and not source.is_active)
+            elif (source.visibility != item.visibility or source.index_job_id != run.id or (item.action != "removed" and not source.is_active)
                   or (item.action == "removed" and source.is_active)
                   or (item.action != "removed" and (source.index_generation != item.generation
                       or source.index_status != "indexing" or source.content_sha256 != item.chunks[0]["content_sha256"]
                       or source.authorization_basis != item.authorization))):
                 raise ValueError("Source permissions or job ownership changed during processing")
+            if user is not None and source is not None:
+                check_submission(user, source, item.visibility)
 
 
 def process(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer) -> dict:
@@ -147,7 +168,7 @@ def process(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexe
             else:
                 with transaction(sessions) as db:
                     require_run(db, run)
-                    source = source_record(db, item.url, lock=True)
+                    source = source_record(db, item.url, lock=True, internal=run.request.scope == "internal")
                     if source is None or source.index_job_id != run.id or source.index_generation != item.generation:
                         raise ValueError("Source ownership changed before replacement")
                     source.index_generation = run.token
@@ -182,16 +203,19 @@ def process(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexe
     }
     with transaction(sessions) as db:
         job = require_run(db, run)
+        user = actor(db, job) if run.request.scope == "internal" else None
         for item in work:
-            source = source_record(db, item.url, lock=True)
+            source = source_record(db, item.url, lock=True, internal=run.request.scope == "internal")
             if source is None and item.action != "removed":
                 raise ValueError("Source disappeared before publication")
-            if source and (source.index_job_id != run.id or (item.action != "removed" and not source.is_active)
+            if source and (source.visibility != item.visibility or source.index_job_id != run.id or (item.action != "removed" and not source.is_active)
                            or (item.action == "removed" and source.is_active)
                            or (item.action != "removed" and (source.index_generation != item.generation
                                or source.index_status != "indexing" or source.content_sha256 != item.chunks[0]["content_sha256"]
                                or source.authorization_basis != item.authorization))):
                 raise ValueError("Source ownership or permissions changed before publication")
+            if source and user is not None:
+                check_submission(user, source, item.visibility)
             if source:
                 source.last_synced_at = now()
                 if item.action == "indexed":

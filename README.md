@@ -67,7 +67,7 @@ From the project root, extract one page, one article, and one product:
 
     PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.public_site --limit-per-type 1 --output data/extracted/public_site_sample.jsonl
 
-Each JSONL record includes a stable source ID, public visibility, pending review status, source type, URL, title, fetch time, content checksum, and extracted text. The output directory is ignored by Git. Inspect the records before increasing `--limit-per-type` (maximum 1500 per type). Chat uses only the registered and indexed seed, not the full extracted file. Staff-only material must wait until a private-document ingestion path exists.
+Each JSONL record includes a stable source ID, public visibility, pending review status, source type, URL, title, fetch time, content checksum, and extracted text. The output directory is ignored by Git. Inspect the records before increasing `--limit-per-type` (maximum 1500 per type). Chat uses only registered and indexed content, not the full extracted file. Step 4 below adds authenticated private-document ingestion.
 
 A full public crawl was run on 2026-10-12 with `--limit-per-type 1500 --delay-seconds 0.5 --output data/extracted/public_site_full.jsonl`. It produced 1,008 review records; 142 product links did not yield useful text. The local audit is `data/extracted/public_site_audit.md`. Both files remain ignored by Git. Some descriptions and articles include changing claims despite excluding structured offer fields, so review them before any indexing or answer generation.
 
@@ -87,7 +87,7 @@ The prototype selects the public About Us and Shower Niche records from `data/ex
 
 `chunking.py` writes three 100-word-maximum chunks with 15-word overlap to `data/extracted/rag_seed_chunks.jsonl`. `register_seed.py` records the two already authorized URLs and their content checksums in PostgreSQL's `source_registrations` table; rerunning it does not reactivate disabled sources. `index_seed.py` requires active matching registrations, embeds the chunks, and upserts them with `review_status: approved`, `approval_basis: owner_authorized_source_for_internal_use`, and `prototype_only: false`. `search_seed.py --approved` embeds a question and prints ranked text, source URLs, and similarity scores. Its default mode is the old pending/prototype diagnostic filter and should now return no seed points. The local extracted files are ignored by Git and retain their original `pending` labels; authorization is applied when indexing. On 2026-10-13 the project owner authorized the supplied sources for internal use and chose source-level approval for future authorized admin/staff uploads and registered URLs. Company questions on `/chat` and explicit `/ask` use this small approved public-site seed. The CLI scripts are a learning prototype, not a source synchronization workflow.
 
-Before answering, `/ask`, routed company `/chat`, and the grounded-answer CLI compare each retrieved Qdrant point with its PostgreSQL source registration: source ID, URL, type, visibility, active status, and content checksum must match. Unknown or disabled sources are excluded. Qdrant also prefilters visibility by the authenticated role. Both internal roles can use the current public seed. The registry can express staff and admin visibility, but real private-document indexing is not built yet. In DataGrip, inspect `public.source_registrations` to see the two authorized sources.
+Before answering, `/ask`, routed company `/chat`, and the grounded-answer CLI compare each retrieved Qdrant point with its PostgreSQL source registration: source ID, URL, type, visibility, active/ready status, published generation, and content checksum must match. Unknown, disabled, or unpublished sources are excluded. Qdrant also prefilters visibility by the authenticated role. Both internal roles can use the current public seed; Step 4 supports staff/admin documents too. In DataGrip, inspect `public.source_registrations` to see authorized sources.
 
 ## Grounded-answer CLI seed
 
@@ -227,4 +227,55 @@ The real-service integration test is opt-in and creates/removes a disposable Pos
 
 It checks migration compatibility, real import, a two-chunk-to-one-chunk update, unchanged skip, explicit removal, authorization, and persisted job completion. Unit tests additionally force partial cleanup failures, retries, worker expiry, permission changes, and concurrent claims. No live seed source is updated or removed by that integration test.
 
-Step 3 is complete for the local public-site workflow. Phase 5 remains in progress: Step 4 adds authenticated URL/file ingestion and needed parsers; Step 5 broadens data and evaluations. There is still no upload endpoint or screen, PDF parser, automatic website synchronization, or current-price/stock authority. The chat index still contains only two website documents and three chunks.
+Step 3 is complete for the local public-site workflow. Step 4 below extends it to authenticated submissions. Phase 5 still needs Step 5 coverage/evaluation and authoritative structured-source decisions. Automatic website synchronization and current-price/stock authority remain unimplemented. The deployed chat index still contains only two website documents and three chunks until an authorized user imports more content.
+
+## Phase 5 learning checkpoint — Step 4
+
+Admins and staff can now submit one URL or file per request. The API authenticates before reading the upload body, extracts bounded descriptive text, retains the original in local storage, records the authenticated submitter, and runs the existing durable job. Processing is synchronous: the response waits for completion or a safe error containing the job ID. There is no Celery/Redis/background queue. One ingestion request runs per API process; another receives HTTP 429 with `Retry-After`. Job status remains available after a request ends or fails. The extraction subprocess exists to enforce resource limits, not to schedule background jobs.
+
+Install the updated dependencies and apply the migration from the project root (both already done in the verified workspace):
+
+    backend/.venv/bin/python -m pip install -r backend/requirements-dev.lock
+    backend/.venv/bin/alembic upgrade head
+
+Restart the API using `./scripts/dev.sh` if needed, then open `http://127.0.0.1:8000/docs`. Authenticate with your own account and use **Authorize** with your bearer token, or reuse Postman's Authorization tab. Keep credentials private. The OpenAPI page exposes the submission inputs, including a file picker; it is a developer interface, not the planned project upload screen.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/v1/ingestion/files` | Multipart file submission or update |
+| `POST /api/v1/ingestion/urls` | Fetch and import one configured HTTPS HTML page |
+| `GET /api/v1/ingestion/jobs?limit=5` | Recent job metadata; staff see their own permitted jobs, admins see all |
+| `GET /api/v1/ingestion/jobs/{job_id}` | Inspect one job without exposing its stored document snapshot |
+| `POST /api/v1/ingestion/jobs/{job_id}/retry` | Explicit retry of a permitted internal job's saved snapshot |
+| `GET /api/v1/ingestion/sources?limit=20&offset=0` | List source metadata permitted for the current role |
+| `DELETE /api/v1/ingestion/sources/{source_id}` | Explicitly disable a managed source and delete its vectors |
+| `GET /api/v1/ingestion/files/{file_id}` | Download a ready, active uploaded original after source authorization |
+
+In Postman, choose `POST http://127.0.0.1:8000/api/v1/ingestion/files`, select **Body → form-data**, and add `file` with type **File**. Choose a UTF-8 `.txt`/`.md` or text-based `.pdf`. Optional text fields are `visibility` (default `staff`), `title`, and `source_id`. Blank optional `title`/`source_id` fields are treated as omitted, including empty values submitted from `/docs`; the filename supplies the default title. Invalid nonempty metadata identifies its field without echoing the submitted value. Let Postman generate the multipart Content-Type/boundary. To replace an existing uploaded document, supply its `source_id`, keep its visibility and format, and choose the new file; the source identity and citation link stay stable. Without `source_id`, each upload creates a new source, even for the same filename. Unknown/repeated fields and multiple files are rejected.
+
+Staff may create staff-visible sources and update/remove their own staff-visible sources. Staff-visible material is readable by other staff and admins. Admins may create public, staff, or admin sources and manage any source. Import does not change an existing source's visibility, owner, or authorization basis, or reactivate a disabled source. In this internal release, `public` describes source classification; anonymous API access remains denied. Submissions are approved at source level with no page-by-page approval queue. This does not certify their accuracy or freshness.
+
+For a URL, send JSON to `POST /api/v1/ingestion/urls`, for example:
+
+```json
+{
+  "url": "https://sardarandco.com/pages/about-us",
+  "visibility": "public"
+}
+```
+
+Use an admin for this existing public source. Staff cannot take over its local-operator registration. Defaults permit only the exact host `sardarandco.com` and its descriptive pages/articles/products. An operator can configure additional approved hosts using `SARDARS_INGESTION_URL_HOSTS` as a JSON array; generic HTML uses a main/article/body extractor. This fetches one page, not the whole site, and does not execute JavaScript. URLs must use HTTPS with no credentials, query, fragment, or custom port. Robots restrictions apply; redirects and private/non-global DNS addresses are rejected. Connections pin a checked public IP while retaining TLS hostname verification, preventing a DNS change between checking and connecting from targeting internal services. URL responses are bounded to 3 MiB; PDF URLs must be uploaded as files instead.
+
+The upload limit is 5 MiB and the multipart body limit includes 64 KiB of overhead. Extracted text is capped at 50,000 characters and 10,000 words; PDFs at 50 pages. Extraction has a 30-second wall-clock limit, a 20-second CPU limit, and a 512 MiB process memory limit on Linux. Encrypted, malformed, blank, and scanned/image-only PDFs fail safely; OCR, DOCX, spreadsheets, and multilingual evaluation remain later work. Ingestion/indexing has the existing configured processing budget. This is descriptive RAG ingestion, not a price/inventory import.
+
+`SARDARS_INGESTION_STORAGE_DIR` defaults to Git-ignored `data/uploads`. Originals use generated UUID names with restrictive permissions; user filenames are metadata, never paths. This directory is not served as static content. File citations point to the protected download endpoint; the original checksum is verified before download and untrusted content is sent as an attachment. Replacements/removals retain previous originals and job snapshots for recovery/history; there is no retention cleanup or full-data erasure endpoint yet. Back up both PostgreSQL and the configured storage directory.
+
+A successful submission returns `job_id`, counts, and `sources` containing stable source IDs and citation URLs. Validation/extraction failures before job creation return HTTP 400/413/422 without a job. Indexing failures return HTTP 503 with `detail.job_id`; inspect that job and resolve the reported cause before retrying. API retries are for authenticated internal jobs; local-operator jobs still use the CLI. Limits are three total attempts, and permissions/account activity are checked again during processing. Logs record job IDs, attempts, counts, safe error codes, and duration, without document text or credentials.
+
+`SARDARS_EMBEDDING_BATCH_SIZE` defaults to two chunks and supports one through eight. Smaller batches bound each model request more tightly on a CPU laptop. `SARDARS_IMPORT_TIMEOUT_SECONDS` defaults to 300 and is capped at 600; this local installation was set to 600 after a 26-chunk PDF exceeded five minutes. An upload below the file/page limits can still exceed the processing budget, especially under memory/swap pressure. Model requests keep the existing bounded timeout and model-unload setting. Errors distinguish the overall processing budget, embedding/vector request timeouts, connection failures, and HTTP statuses without returning service bodies. If indexing fails, the source remains unavailable until recovery. Retry the existing job rather than uploading a duplicate; splitting a document may be necessary if it cannot finish within the maximum budget. These are synchronous requests, not an indication of background worker progress.
+
+Run the new checks:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_ingestion_api.py backend/tests/test_ingestion_extraction.py
+
+The opt-in test command above also verifies real authenticated uploads and private retrieval in disposable namespaces. It requires the local services and access to the authorized About Us page. Uploaded test documents and temporary accounts are isolated from the project database/index; they are not real company knowledge. Broader answerability, source quality, retrieval ranking, and current facts remain Step 5 and later work.

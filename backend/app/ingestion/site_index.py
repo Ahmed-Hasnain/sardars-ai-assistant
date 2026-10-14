@@ -89,7 +89,16 @@ class WebsiteIndexer:
                     if len(content) > MAX_RESPONSE_BYTES:
                         raise IndexingError("Local service response exceeds the size limit")
         except httpx.HTTPError as exc:
-            raise IndexingError("Local embedding or vector service unavailable") from exc
+            if time.monotonic() >= self.deadline:
+                raise IndexingError("Import exceeded its processing time budget") from exc
+            service = "Embedding" if url.endswith("/api/embed") else "Vector"
+            if isinstance(exc, httpx.TimeoutException):
+                message = f"{service} service request timed out"
+            elif isinstance(exc, httpx.HTTPStatusError):
+                message = f"{service} service returned HTTP {exc.response.status_code}"
+            else:
+                message = f"{service} service unavailable"
+            raise IndexingError(message) from exc
         self._timeout()
         try:
             body = json.loads(content)
@@ -217,8 +226,9 @@ cannot disappear from the completeness check. Never search semantically here.
 
     def upsert_chunks(self, chunks: list[dict], authorization: dict[str, str]) -> None:
         """Caller supplies registry-checked chunks and their authorization basis."""
-        for start in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
-            batch = chunks[start:start + EMBEDDING_BATCH_SIZE]
+        batch_size = self.settings.embedding_batch_size
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start:start + batch_size]
             body = self._request(
                 "POST", f"{self.settings.ollama_base_url.rstrip('/')}/api/embed",
                 json={

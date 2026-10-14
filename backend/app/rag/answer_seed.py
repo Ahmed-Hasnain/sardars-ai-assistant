@@ -12,6 +12,7 @@ import sys
 from app.core.config import Settings
 from app.db.session import SessionLocal
 from app.ingestion.public_site import source_type
+from app.ingestion.documents import valid_source
 from app.llm.base import ChatMessage, ChatModel
 from app.llm.ollama import OllamaChatModel
 from app.retrieval.search_seed import search_approved
@@ -90,7 +91,7 @@ def _contains_prompt_instruction(text: str) -> bool:
 
 
 def _approved_excerpts(points: list[dict]) -> list[Evidence]:
-    """Keep only approved Sardars website chunks after source-policy filtering."""
+    """Keep approved descriptive chunks after source-policy filtering."""
     excerpts: list[Evidence] = []
     for point in points[:3]:
         payload = point.get("payload", {})
@@ -104,7 +105,7 @@ def _approved_excerpts(points: list[dict]) -> list[Evidence]:
             or payload.get("review_status") != "approved"
             or payload.get("prototype_only") is not False
             or not isinstance(url, str)
-            or source_type(url) != payload.get("source_type")
+            or not valid_source(url, payload.get("source_type"))
             or not isinstance(title, str)
             or _contains_prompt_instruction(title)
             or not isinstance(source_id, str)

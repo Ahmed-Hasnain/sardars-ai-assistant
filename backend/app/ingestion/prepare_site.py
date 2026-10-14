@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.ingestion.chunking import MAX_WORDS, OVERLAP_WORDS, chunk_record
 from app.ingestion.public_site import source_type
 from app.ingestion.site_documents import WebsiteDocument
+from app.ingestion.documents import SuppliedDocument
 
 
 MAX_INPUT_BYTES = 32 * 1024 * 1024
@@ -75,7 +76,7 @@ def load_selected_documents(path: Path, urls: list[str]) -> list[WebsiteDocument
     return [selected[url] for url in urls]
 
 
-def prepare_chunks(documents: list[WebsiteDocument]) -> list[dict]:
+def prepare_chunks(documents: list[WebsiteDocument | SuppliedDocument]) -> list[dict]:
     """Reuse the seed chunker; no chunk becomes authorized by being prepared."""
     return [
         chunk
