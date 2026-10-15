@@ -249,6 +249,7 @@ def test_ask_checks_auth_before_retrieval_and_returns_citations(local_app) -> No
     assert response.json()["sources"] == [{
         "number": 1, "source_id": SOURCE_ID, "title": "About Us",
         "url": SOURCE_URL, "fetched_at": None,
+        "content_derivation": None, "original_content_sha256": None,
     }]
     assert "Bongio" in response.json()["answer"]
 

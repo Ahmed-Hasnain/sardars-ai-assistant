@@ -26,6 +26,8 @@ def chunk_record(record: dict) -> list[dict]:
             "chunk_index": index,
             "text": " ".join(chunk_words),
         }
+        if record.get("derivation") is not None:
+            chunk["derivation"] = record["derivation"]
         chunks.append(chunk)
 
         if start + MAX_WORDS >= len(words):

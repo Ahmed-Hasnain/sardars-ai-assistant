@@ -1,6 +1,6 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-14
+Last reviewed: 2026-10-15
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -180,6 +180,7 @@ Learning checkpoints (added 2026-10-14): implement and verify small runnable che
 | 3 | Source synchronization | Skip unchanged content; replace changed content and remove obsolete chunks; handle removal/disablement, processing failures, and safe retries without exposing stale evidence | Complete for the local public-site CLI: isolated real-service lifecycle and failure/retry tests passed; existing seed skipped unchanged |
 | 4 | Authenticated URL and file ingestion | Authorized admin/staff can submit supported source formats through the API with local file storage, source visibility, bounded extraction, and processing status; add parsers as needed | Complete for supported formats: real URL/PDF/Markdown API and private cited retrieval verified, TXT/failures/limits tested; upload screen belongs to frontend work |
 | 5 | Broader data coverage and evaluation | Import additional authorized descriptive sources in bounded batches; check extraction and answers; defer structured product/variant records until ownership, IDs, source priority, and freshness rules are defined | Complete for V1 descriptive scope: eight website documents/twelve chunks; 25-case evaluation passed; company database work deferred by developer to tools |
+| 6 | Full saved-crawl descriptive coverage | Account for every saved record; preserve originals and derived-text provenance; import suitable content in resumable serial batches; verify repeat imports, permissions and representative answers against the enlarged corpus | In progress from 2026-10-15; the previous eight-document checkpoint did not finish full-site coverage |
 
 Step 1 reuses the 100-word/15-word-overlap chunker to isolate validation from later synchronization changes. It does not authorize or index sources, parse PDFs, or add an upload endpoint. The extractor's legacy `pending` field remains in prepared files; source authorization will be enforced separately when importing, with no per-document approval queue. These checkpoints divide the work; the Phase 5 exit criteria below still apply.
 
@@ -206,9 +207,13 @@ Step 4 uses the existing synchronous job runner instead of introducing Celery/Re
 
 Exit met for the V1 descriptive scope on 2026-10-14: updates/removals and recoverable jobs were verified in Steps 3/4; the Step 5 batch expanded company coverage to eight documents/twelve chunks with source IDs, checksums, fetch dates, and role checks. Repeat import skipped all eight sources/twelve chunks; the broader evaluation passed 25/25 and the original seed baseline 7/7. This is a bounded prototype corpus, not full-site indexing or general answer-quality proof. See `docs/phase5_step5_report.md`. The developer's separate staff-visible interview PDF adds 26 test chunks and is not authoritative company information. Phase 5 is complete within this scope; current price/stock and exact structured records remain deferred to Phases 6/7.
 
+Scope clarification, 2026-10-15: **Phase 5 full-site coverage remains active** before Phase 6. Step 6 extends the verified pipeline rather than reopening its earlier lifecycle milestones. Full coverage requires every one of the 1,008 saved records to have an inspectable disposition, all suitable prepared sources to be active/ready with matching verified generations, a repeat import that skips unchanged content, and larger-corpus retrieval/answer results with failures investigated and limits recorded. Prepared files or a successful small batch do not meet that exit. Whole-source and passage exclusions must have reasons; heuristic flags are not a document approval queue or proof of incorrect facts. Preserve verbatim descriptive excerpts, original checksums/fetch dates, and omission offsets; never repair uncertain specifications by inference. Keep batches serial, embedding requests small, job deadlines bounded, and explicit retries on the existing durable jobs. Price/stock tools remain deferred.
+
 ## Phase 6 — Safe read-only tools
 
 Goal: the model can request narrow application functions for exact facts.
+
+Start decision, 2026-10-15: the developer requested beginning Phase 6 while Phase 5 full-site ingestion remains unfinished. Source discovery is active; neither phase is declared complete. Sardars has an ERP and a website, but the developer currently has no ERP access and will request it. ERP identity/read interface, field authority, website synchronization, stable IDs, permissions and freshness rules remain unresolved. See `docs/phase6_source_contract.md` for the access checklist and checkpoints from one verified direct lookup to model tool calling. Build the concrete lookup after source discovery rather than adding unused tool infrastructure.
 
 - [ ] Define the authoritative company database/export, owner, stable product/variant IDs, source priority, permitted access, and freshness/as-of rules before implementing product/price/stock read tools. The developer explicitly requested this integration after Phase 5 descriptive ingestion.
 - [ ] Add an explicit tool registry with strict Pydantic argument and result schemas; never execute arbitrary SQL, Python, shell commands, or function names from model text.

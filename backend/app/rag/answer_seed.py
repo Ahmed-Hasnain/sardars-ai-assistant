@@ -38,6 +38,8 @@ BRAND_QUESTION_PATTERN = re.compile(r"^what is ([a-z][a-z0-9-]{1,60})\s*\??$", r
 BRAND_MENTION_PATTERN = re.compile(r"\bbrands?\b", re.I)
 PREMIUM_BRAND_PATTERN = re.compile(r"\bpremium\s+brands?\b", re.I)
 PRODUCT_DESCRIPTION_PATTERN = re.compile(r"\b(?:made of|materials?|construction|features?|includes?|offers?|offering|designed for|provides?|providing)\b", re.I)
+BRAND_LIST_PATTERN = re.compile(r"\bbrands?\b.{0,50}\b(?:including|include[sd]?|like|such as)\b", re.I)
+PRODUCT_DISCOVERY_PATTERN = re.compile(r"\b(?:what|which)\b.{0,100}\bproducts?\b", re.I)
 QUESTION_FILLER = {
     "a", "about", "an", "and", "are", "company", "do", "does", "for", "from",
     "how", "in", "is", "it", "mention", "mentions", "mentioned", "of", "product",
@@ -70,6 +72,8 @@ class CitedSource:
     title: str
     url: str
     fetched_at: str | None
+    content_derivation: str | None = None
+    original_content_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,9 +83,12 @@ class Evidence:
     url: str
     fetched_at: str | None
     text: str
+    content_derivation: str | None = None
+    original_content_sha256: str | None = None
 
     def cited_source(self, number: int) -> CitedSource:
-        return CitedSource(number, self.source_id, self.title, self.url, self.fetched_at)
+        return CitedSource(number, self.source_id, self.title, self.url, self.fetched_at,
+                           self.content_derivation, self.original_content_sha256)
 
 
 def _approved_excerpts(points: list[dict]) -> list[Evidence]:
@@ -94,6 +101,12 @@ def _approved_excerpts(points: list[dict]) -> list[Evidence]:
         content = payload.get("text")
         source_id = payload.get("source_id")
         fetched_at = payload.get("fetched_at")
+        derivation = payload.get("derivation")
+        method, original_checksum = None, None
+        if isinstance(derivation, dict) and derivation.get("method") == "descriptive_spans_v1":
+            checksum = derivation.get("original_content_sha256")
+            if isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum):
+                method, original_checksum = derivation["method"], checksum
         if (
             payload.get("visibility") not in {"public", "staff", "admin"}
             or payload.get("review_status") != "approved"
@@ -112,6 +125,7 @@ def _approved_excerpts(points: list[dict]) -> list[Evidence]:
             source_id, title, url,
             fetched_at if isinstance(fetched_at, str) else None,
             content[:MAX_CHUNK_CHARS],
+            method, original_checksum,
         ))
     return excerpts
 
@@ -164,16 +178,20 @@ def _matching_sentences(
                     and _terms(excerpt.title).issubset(_terms(previous))
                 ):
                     sentence = f"{previous} {sentence}"
+            if source_type(excerpt.url) == "products" and not _terms(excerpt.title).issubset(_terms(sentence)):
+                sentence = f"{excerpt.title}: {sentence}"
             if (excerpt.url, sentence) not in seen:
                 matches.append(Evidence(
                     excerpt.source_id, excerpt.title, excerpt.url,
                     excerpt.fetched_at, sentence,
+                    excerpt.content_derivation, excerpt.original_content_sha256,
                 ))
                 seen.add((excerpt.url, sentence))
 
     selected: list[Evidence] = []
     used_chars = 0
     for match in sorted(matches, key=lambda item: (
+        0 if "brand" in required and BRAND_LIST_PATTERN.search(item.text) else 1,
         0 if source_type(item.url) == "products" and PRODUCT_DESCRIPTION_PATTERN.search(item.text) else 1,
         len(item.text),
     )):
@@ -254,10 +272,18 @@ async def answer_from_points(
     citation_numbers = {int(value) for value in CITATION_PATTERN.findall(answer)}
     uncited_answer = CITATION_PATTERN.sub("", answer).strip()
 
+    # A discovery answer must identify the product, even when the model extracts
+    # only its feature sentence. The title is source metadata, not an invented name.
+    if (PRODUCT_DISCOVERY_PATTERN.search(question) and source_type(matches[0].url) == "products"
+        and not _terms(matches[0].title).issubset(_terms(uncited_answer))):
+        match = matches[0]
+        return CitedAnswer(f"{match.text} [1]", [match.cited_source(1)], response.model)
+
     # The small local model sometimes cites the abstention or omits a citation
     # from a supported answer. In either case, show the exact matching sentence.
     if (
         uncited_answer == FALLBACK
+        or not uncited_answer
         or not citation_numbers
         or any(number < 1 or number > len(matches) for number in citation_numbers)
     ):
