@@ -12,9 +12,10 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import User
+from app.services.product_lookup import AmbiguousSku, TooManyVariants, get_product_details
 from app.services.source_status import get_source_status
 from app.tools.schemas import (
-    SourceStatusArguments, ToolError, ToolFailure, ToolInvocation, ToolResult, ToolSuccess,
+    ProductArguments, SourceStatusArguments, ToolError, ToolFailure, ToolInvocation, ToolResult, ToolSuccess,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,12 @@ TOOLS: Mapping[str, ReadTool] = MappingProxyType({
         "get_source_status",
         "Read a visible source's fetch/index/sync status from the application registry. "
         "This reports ingestion metadata, not current product prices, stock or verified company facts.",
+        frozenset({"staff", "admin"}),
+    ),
+    "get_product_details": ReadTool(
+        "get_product_details",
+        "Read developer-authorized current prices and SKUs from PostgreSQL by exact SKU, handle, or product question. "
+        "Currency and external synchronization status are unknown; stock is not verified.",
         frozenset({"staff", "admin"}),
     ),
 })
@@ -59,21 +66,28 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
     if argument_bytes > MAX_ARGUMENT_BYTES:
         return _failure(call.name, "invalid_arguments", "Invalid tool arguments")
     try:
-        arguments = SourceStatusArguments.model_validate(call.arguments)
+        arguments = (SourceStatusArguments if call.name == "get_source_status" else ProductArguments).model_validate(call.arguments)
     except ValidationError:
         return _failure(call.name, "invalid_arguments", "Invalid tool arguments")
     try:
-        # This explicit binding is the entire registry for this checkpoint.
-        # Adding a tool requires application code and its own input/result schema.
-        status = get_source_status(db, user, arguments.source_id)
-        if status is None:
-            return _failure(call.name, "source_not_found", "Source not found")
-        result = ToolSuccess(tool=call.name, data=status)
+        if call.name == "get_source_status":
+            data = get_source_status(db, user, arguments.source_id)
+            missing = "source_not_found"
+        else:
+            data = get_product_details(db, user.role, arguments)
+            missing = "product_not_found"
+        if data is None:
+            return _failure(call.name, missing, "Source not found" if missing == "source_not_found" else "Product not found")
+        result = ToolSuccess(tool=call.name, data=data)
         if len(result.model_dump_json().encode("utf-8")) > MAX_RESULT_BYTES:
             return _failure(call.name, "invalid_result", "Tool result unavailable")
         return result
     except ValidationError:
         return _failure(call.name, "invalid_result", "Tool result unavailable")
+    except AmbiguousSku:
+        return _failure(call.name, "ambiguous_sku", "SKU matches multiple variants")
+    except TooManyVariants:
+        return _failure(call.name, "too_many_variants", "Product has too many variants for this lookup")
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) in {"57014", "55P03"}:
             return _failure(call.name, "tool_timeout", "Tool lookup timed out")

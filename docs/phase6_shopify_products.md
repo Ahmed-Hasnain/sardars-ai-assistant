@@ -2,7 +2,7 @@
 
 Scope agreed 2026-10-16: use the developer's Sardars Shopify product export as a dated database snapshot. ERP access is unavailable and is not required for this proof of concept. Demonstrate one controlled product lookup from PostgreSQL, then verify model tool calling. This is not a live price/inventory integration.
 
-Latest checkpoint: the developer authorized import after the DataGrip column-mapping failure. All **4,983 CSV rows / 2,009 handles** are committed in `public.products`. Post-commit comparison verified all export fields/provenance, and replay skipped all 4,983 with zero inserts. The original 15 populated SKUs and exported prices were preserved; no synthetic values were generated. Export/as-of time and currency remain unknown. Product lookup and model tool calling still require the next agreed checkpoint.
+This page records the **initial import checkpoint**. All **4,983 CSV rows / 2,009 handles** were committed in `public.products`; replay skipped all 4,983. At that checkpoint, the original 15 populated SKUs and exported prices were unchanged. The developer later edited SKUs and prices, then designated the current table values as valid for internal-assistant product answers. The current authority, classification and read tool are documented in [the Phase 6 product-tool guide](phase6_product_tool.md). Export/as-of time and currency remain unknown.
 
 ## Checkpoint 1: table creation
 
@@ -20,7 +20,7 @@ Shopify can represent one product with multiple rows for variants and extra imag
 
 All exported fields except `handle` are nullable. Original HTML remains untrusted data; storing it neither executes it nor authorizes rendering it. Image URLs are stored strings, not fetched by this schema. `Cost per item` is retained for source completeness; a later tool must use an explicit output allowlist and agreed field permissions, rather than expose the whole row.
 
-Eight technical columns are added (96 total columns):
+Eight technical columns were added by the initial migration (96 columns at that checkpoint). The later Phase 6 provenance migration adds `source_row_kind`, `price_origin`, and `sku_origin`, bringing the current table to 99 columns:
 
 | Column | Meaning |
 | --- | --- |

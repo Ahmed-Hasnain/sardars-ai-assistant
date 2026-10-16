@@ -29,6 +29,9 @@ class Product(Base):
         CheckConstraint("length(trim(handle)) > 0", name="ck_products_handle"),
         CheckConstraint("visibility IN ('staff', 'admin')", name="ck_products_visibility"),
         CheckConstraint("snapshot_currency IS NULL OR (length(snapshot_currency) = 3 AND snapshot_currency = upper(snapshot_currency))", name="ck_products_currency"),
+        CheckConstraint("source_row_kind IN ('unclassified', 'variant', 'image_only')", name="ck_products_row_kind"),
+        CheckConstraint("price_origin IN ('unknown', 'synthetic_test', 'original_export')", name="ck_products_price_origin"),
+        CheckConstraint("sku_origin IN ('unknown', 'synthetic_test', 'original_export')", name="ck_products_sku_origin"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), Identity(), primary_key=True)
@@ -39,6 +42,9 @@ class Product(Base):
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     snapshot_currency: Mapped[str | None] = mapped_column(String(3))
     visibility: Mapped[str] = mapped_column(String(16), default="staff", server_default="staff")
+    source_row_kind: Mapped[str] = mapped_column(String(16), default="unclassified", server_default="unclassified")
+    price_origin: Mapped[str] = mapped_column(String(24), default="unknown", server_default="unknown")
+    sku_origin: Mapped[str] = mapped_column(String(24), default="unknown", server_default="unknown")
 
     handle: Mapped[str] = mapped_column(Text, index=True, info={"csv_header": 'Handle'})
     title: Mapped[str | None] = mapped_column(Text, info={"csv_header": 'Title'})

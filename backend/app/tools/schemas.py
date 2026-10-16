@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -34,10 +34,65 @@ class SourceStatus(StrictModel):
     company_facts_verified: Literal[False] = False
 
 
+class ProductArguments(StrictModel):
+    identifier: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^[^\s\x00-\x1f]+$")
+    question: str | None = Field(default=None, min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def one_lookup(self) -> "ProductArguments":
+        if (self.identifier is None) == (self.question is None):
+            raise ValueError("Provide one lookup input")
+        return self
+
+
+class ProductVariant(StrictModel):
+    source_row_number: int = Field(ge=1)
+    row_kind: Literal["variant", "image_only"]
+    sku: str | None = Field(max_length=200)
+    option1_name: str | None = Field(max_length=200)
+    option1_value: str | None = Field(max_length=200)
+    option2_name: str | None = Field(max_length=200)
+    option2_value: str | None = Field(max_length=200)
+    option3_name: str | None = Field(max_length=200)
+    option3_value: str | None = Field(max_length=200)
+    price: str = Field(max_length=80)
+
+
+class ProductDetails(StrictModel):
+    authority: Literal["developer_authorized_products_table"] = "developer_authorized_products_table"
+    observed_at: AwareDatetime
+    query_match: Literal["sku", "handle", "name"]
+    handle: str = Field(max_length=200)
+    title: str | None = Field(max_length=500)
+    vendor: str | None = Field(max_length=200)
+    source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_exported_at: AwareDatetime | None
+    imported_at: AwareDatetime
+    currency: str | None = Field(max_length=3)
+    database_values_verified: Literal[True] = True
+    current_price_verified: Literal[True] = True
+    external_sync_verified: Literal[False] = False
+    inventory_verified: Literal[False] = False
+    variants: list[ProductVariant] = Field(min_length=1, max_length=32)
+
+
+class ProductCandidate(StrictModel):
+    handle: str = Field(max_length=200)
+    title: str | None = Field(max_length=500)
+
+
+class ProductCandidates(StrictModel):
+    authority: Literal["developer_authorized_products_table"] = "developer_authorized_products_table"
+    observed_at: AwareDatetime
+    matches: list[ProductCandidate] = Field(min_length=2, max_length=5)
+    more_matches: bool
+
+
 class ToolError(StrictModel):
     code: Literal[
         "unknown_tool", "permission_denied", "invalid_arguments", "source_not_found",
         "tool_timeout", "tool_unavailable", "invalid_result",
+        "product_not_found", "ambiguous_sku", "too_many_variants",
     ]
     message: str = Field(max_length=200)
 
@@ -45,7 +100,7 @@ class ToolError(StrictModel):
 class ToolSuccess(StrictModel):
     tool: str = Field(max_length=64)
     ok: Literal[True] = True
-    data: SourceStatus
+    data: SourceStatus | ProductDetails | ProductCandidates
 
 
 class ToolFailure(StrictModel):

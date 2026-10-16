@@ -8,6 +8,7 @@ from app.auth.dependencies import get_current_user
 from app.llm.base import ChatResult, ModelError
 from app.rag.answer_seed import CitedAnswer, CitedSource, FALLBACK
 from app.main import app
+from app.schemas.chat import ChatResponse
 
 client = TestClient(app)
 
@@ -76,3 +77,12 @@ def test_chat_company_abstention_has_no_citation() -> None:
     assert response.json()["route"] == "company"
     assert response.json()["answer"] == FALLBACK
     assert response.json()["sources"] == []
+
+
+def test_chat_routes_exact_product_price_question_to_tool_flow() -> None:
+    with patch("app.api.chat.answer_product", new_callable=AsyncMock) as product:
+        product.return_value = ChatResponse(answer="test price 150", route="product", model="test-model")
+        response = client.post("/api/v1/chat", json={"message": "What is the price of SKU TEST-1?"})
+    assert response.status_code == 200
+    assert response.json()["route"] == "product"
+    product.assert_awaited_once()
