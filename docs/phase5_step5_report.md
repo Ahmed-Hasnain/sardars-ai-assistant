@@ -1,5 +1,7 @@
 # Phase 5 Step 5 — descriptive coverage and evaluation
 
+Historical checkpoint: the results below describe the selected eight-document corpus on 2026-10-14. Full saved-crawl coverage was explicitly reopened on 2026-10-15 and remains separate from this limited pipeline milestone. See `PLAN.md` Step 6 and the full-site coverage commands in README; do not read this report as evidence that all 1,008 records were indexed.
+
 Verified on 2026-10-14. Step 5 and Phase 5 are complete for the agreed internal descriptive ingestion/synchronization scope. The developer deferred company-database price and stock access to later tools; those values are not integrated or verified here.
 
 ## What changed

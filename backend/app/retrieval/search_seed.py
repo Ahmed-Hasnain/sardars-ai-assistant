@@ -1,4 +1,5 @@
 import sys
+import re
 
 import httpx
 
@@ -30,19 +31,47 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
         if len(vector) != DIMENSIONS:
             raise ValueError("Unexpected query embedding dimensions")
 
+        preferred = []
+        # Preserve the existing narrow Bongio definition when unrelated short
+        # titles outrank its descriptive company profile in a larger corpus.
+        # This is a retrieval hint; SQL authorization and source-text checks still
+        # decide whether any point is usable. No brand fact is stored here.
+        if settings.brand_definition_profile_url and re.fullmatch(r"\s*what is bongio\s*\??\s*", question, re.I):
+            response = client.post(
+                f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll",
+                json={"filter": {**point_filter, "must": [*conditions,
+                       {"key": "url", "match": {"value": settings.brand_definition_profile_url}}]},
+                      "limit": 2, "with_payload": True, "with_vector": False},
+            )
+            response.raise_for_status()
+            preferred = response.json()["result"]["points"]
+            if not isinstance(preferred, list) or len(preferred) > 2:
+                raise ValueError("Unexpected profile retrieval response")
+
         response = client.post(
             f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/query",
             json={
                 "query": vector,
                 "filter": point_filter,
-                "limit": CANDIDATE_LIMIT,
+                "limit": CANDIDATE_LIMIT - len(preferred),
                 "with_payload": True,
                 "with_vector": False,
             },
         )
         response.raise_for_status()
 
-    return response.json()["result"]["points"]
+        points = response.json()["result"]["points"]
+        if not isinstance(points, list) or len(points) > CANDIDATE_LIMIT - len(preferred):
+            raise ValueError("Unexpected retrieval candidate count")
+    result = []
+    seen = set()
+    for point in preferred + points:
+        if not isinstance(point, dict) or not isinstance(point.get("id"), (str, int)):
+            raise ValueError("Unexpected retrieval point")
+        if point["id"] not in seen:
+            seen.add(point["id"])
+            result.append(point)
+    return result
 
 
 def search_approved(question: str) -> list[dict]:

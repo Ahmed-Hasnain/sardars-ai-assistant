@@ -40,6 +40,16 @@ def test_evaluation_catches_forged_or_mismatched_citations():
     assert "citation markers do not match returned sources" in failures
 
 
+def test_valid_description_alternatives_still_require_the_correct_source():
+    c = Case(id="description", question="How is the project described?", expected_source=CONTROL_URL,
+             answer_contains_any=["sophisticated", "refined character"])
+    point = {"payload": {"source_id": "a" * 64, "url": CONTROL_URL}}
+    result = CitedAnswer("A refined character. [1]", [CitedSource(1, "a" * 64, "Project", CONTROL_URL, None)])
+    assert validate_answer(c, result, [point]) == []
+    assert validate_answer(c, CitedAnswer("Unrelated description. [1]", result.sources), [point])
+    assert validate_answer(c, result, []) == ["citation is outside the authorized retrieved evidence"]
+
+
 def test_live_service_failure_cannot_pass_an_abstention_case():
     import httpx
     def search(*args):

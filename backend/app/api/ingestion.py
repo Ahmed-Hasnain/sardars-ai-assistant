@@ -1,6 +1,5 @@
 """Internal URL/file ingestion, source access, and redacted job status."""
 
-import asyncio
 from hashlib import sha256
 import threading
 from typing import Annotated
@@ -17,6 +16,7 @@ from starlette.datastructures import UploadFile
 from starlette.requests import Request as StarletteRequest
 
 from app.auth.dependencies import get_current_user
+from app.api.request_limits import bounded_body
 from app.core.config import Settings
 from app.db.models import IngestionJob, SourceRegistration, User
 from app.db.session import get_db
@@ -51,16 +51,6 @@ def process_submission(function, sessions, settings, user_id, args):
         return function(sessions, settings, user_id, *args)
     finally:
         _processing_slot.release()
-
-
-async def bounded_body(request: Request, limit: int) -> bytes:
-    content = bytearray()
-    async with asyncio.timeout(30):
-        async for block in request.stream():
-            content.extend(block)
-            if len(content) > limit:
-                raise HTTPException(413, "Request exceeds its size limit")
-    return bytes(content)
 
 
 async def call(function, db: Session, settings: Settings, user: User, *args) -> dict:

@@ -106,6 +106,40 @@ def test_brand_definition_does_not_guess_for_unrelated_name() -> None:
     model.chat.assert_not_called()
 
 
+def test_citation_identifies_derived_excerpt_and_original_checksum():
+    point = _point()
+    point["payload"]["derivation"] = {"method": "descriptive_spans_v1", "original_content_sha256": "a" * 64}
+    result = asyncio.run(answer_from_points("What is Bongio?", [point], AsyncMock()))
+    assert result.sources[0].content_derivation == "descriptive_spans_v1"
+    assert result.sources[0].original_content_sha256 == "a" * 64
+
+
+def test_brand_list_evidence_precedes_generic_brand_heading():
+    generic = _point()
+    generic["payload"].update(text="Many international brands are discussed.")
+    specific = _point()
+    result = asyncio.run(answer_from_points("Which brands?", [generic, specific], AsyncMock(
+        chat=AsyncMock(return_value=ChatResult(FALLBACK, "test-model", None, None, None)))))
+    assert "Bongio" in result.text and "Grohe" in result.text
+
+
+def test_product_discovery_cannot_drop_the_product_identity():
+    point = _point()
+    point["payload"].update(url="https://sardarandco.com/products/shower-niche-pakistan",
+        source_type="products", title="Shower Niche", text="Stylish, durable, and practical storage for modern bathrooms.")
+    model = AsyncMock()
+    model.chat.return_value = ChatResult("Stylish, durable, and practical storage for modern bathrooms. [1]", "test-model", None, None, None)
+    result = asyncio.run(answer_from_points("What bathroom storage product does Sardars describe?", [point], model))
+    assert "Shower Niche" in result.text and result.sources[0].url == point["payload"]["url"]
+
+
+def test_citation_only_model_output_falls_back_to_actual_evidence():
+    model = AsyncMock()
+    model.chat.return_value = ChatResult("[1]", "test-model", None, None, None)
+    result = asyncio.run(answer_from_points("Which brands?", [_point()], model))
+    assert "Bongio" in result.text and result.text != "[1]"
+
+
 def test_no_approved_evidence_does_not_call_model() -> None:
     point = _point()
     point["payload"]["review_status"] = "pending"

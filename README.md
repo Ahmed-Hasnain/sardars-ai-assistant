@@ -57,7 +57,7 @@ With Ollama and the API running, send a request from Postman using the bearer to
     read -rs -p 'Bearer token: ' SARDARS_TOKEN; printf '\n'
     curl -sS http://127.0.0.1:8000/api/v1/chat -H "Authorization: Bearer $SARDARS_TOKEN" -H 'Content-Type: application/json' -d '{"message":"Explain what a database is in one sentence."}'
 
-`POST /api/v1/chat` uses a simple, conservative rule: clear educational questions such as “What is a database?” go to the general Ollama model; Sardars or ambiguous business questions use registered-source retrieval. The response has `route: general` or `route: company`. Company answers include numbered `sources` with `source_id`, title, Sardars URL, and `fetched_at`; unsupported company questions have no citations. General answers have no company sources and may include model token counts and duration. `company_data_verified` remains false because an authorized source does not prove that changing facts are current. The Ollama settings in `.env.example` default to `qwen3:0.6b` on localhost with `keep_alive=0` to unload the model after each request. This reduces memory use but adds model load time to each request.
+`POST /api/v1/chat` sends clear educational questions such as “What is a database?” to local Ollama. Product-price and SKU questions use a registered PostgreSQL read tool; other Sardars questions use registered-source retrieval. The response has `route: general`, `product`, or `company`. Product answers use the developer-authorized current database values, include `product_source` and set `company_data_verified: true` after a successful read. Currency, stock and external Shopify/ERP synchronization remain unknown. Other company answers include numbered `sources` with `source_id`, title, Sardars URL, and `fetched_at`; unsupported questions have no citations. General answers have no company sources and may include model token counts and duration. The Ollama settings in `.env.example` default to `qwen3:0.6b` on localhost with `keep_alive=0` to unload the model after each request.
 
 ## Public source extraction sample
 
@@ -73,7 +73,7 @@ A full public crawl was run on 2026-10-12 with `--limit-per-type 1500 --delay-se
 
 ## Vector-search runtime
 
-Pull the small local embedding model with `ollama pull qwen3-embedding:0.6b`. Its `/api/embed` response was measured at 1,024 dimensions on this laptop. Qdrant runs through the `qdrant` Compose service at `http://127.0.0.1:6333` with persistent storage. Collection `sardars_public_qwen3_embedding_06b_v1` uses 1,024-dimensional cosine vectors and now contains twelve company website chunks plus twenty-six staff-visible interview-test chunks (38 total). The collection name is retained from the original public seed; role/source permissions govern later content. On a new Qdrant volume, create the collection after starting the service:
+Pull the small local embedding model with `ollama pull qwen3-embedding:0.6b`. Its `/api/embed` response was measured at 1,024 dimensions on this laptop. Qdrant runs through the `qdrant` Compose service at `http://127.0.0.1:6333` with persistent storage. Collection `sardars_public_qwen3_embedding_06b_v1` uses 1,024-dimensional cosine vectors and contained twelve company website chunks plus twenty-six staff-visible interview-test chunks at the selected Step 5 checkpoint (38 total). See the full-site checkpoint below for later coverage. The collection name is retained from the original public seed; role/source permissions govern later content. On a new Qdrant volume, create the collection after starting the service:
 
     curl -sS -X PUT http://127.0.0.1:6333/collections/sardars_public_qwen3_embedding_06b_v1 -H 'Content-Type: application/json' -d '{"vectors":{"size":1024,"distance":"Cosine"}}'
 
@@ -227,7 +227,7 @@ The real-service integration test is opt-in and creates/removes a disposable Pos
 
 It checks migration compatibility, real import, a two-chunk-to-one-chunk update, unchanged skip, explicit removal, authorization, and persisted job completion. Unit tests additionally force partial cleanup failures, retries, worker expiry, permission changes, and concurrent claims. No live seed source is updated or removed by that integration test.
 
-Step 3 is complete for the local public-site workflow. Step 4 below extends it to authenticated submissions. Phase 5 descriptive coverage/evaluation is complete in Step 5 below. Authoritative structured company-database work is deferred to later tools by the developer. Automatic website synchronization and current-price/stock authority remain unimplemented. The company corpus now has eight website documents/twelve chunks, plus the separate staff-visible interview test PDF with twenty-six chunks.
+Step 3 is complete for the local public-site workflow. Step 4 below extends it to authenticated submissions. The limited descriptive pipeline checkpoint was completed in Step 5 below; full saved-crawl coverage is active in Step 6. Authoritative structured company-database work is deferred to later tools by the developer. Automatic website synchronization and current-price/stock authority remain unimplemented. That checkpoint had eight website documents/twelve chunks, plus the separate staff-visible interview test PDF with twenty-six chunks; Step 6 records the later corpus.
 
 ## Phase 5 learning checkpoint — Step 4
 
@@ -282,7 +282,7 @@ The opt-in test command above also verifies real authenticated uploads and priva
 
 ## Phase 5 learning checkpoint — Step 5
 
-Phase 5 is complete for the V1 descriptive ingestion and synchronization scope. The developer deferred current price/stock and authoritative structured data to later company-database tools. Tool calling is not implemented yet. The [Step 5 report](docs/phase5_step5_report.md) records changes, evidence, commands, and limitations.
+The selected Step 5 checkpoint completed the limited V1 descriptive ingestion and synchronization pipeline. Full saved-crawl ingestion was later completed, with answer-quality failures still open. The developer deferred current price/stock and authoritative structured data to later company-database tools. Product tool calling was implemented in the Phase 6 proof of concept below. The [Step 5 report](docs/phase5_step5_report.md) records changes, evidence, commands, and limitations.
 
 The explicit [coverage manifest](data/coverage/public_site_v1.json) selects eight checksum-pinned documents from the saved crawl. It preserves About Us and Shower Niche and adds Cosmetic Mirror, Wall-Mounted Seat Lift-Up, Tile Floor Drain, Square E Corner Basin, Round Over Counter Basin, and Elan Tower. The import completed with six new sources/nine new chunks and skipped the original three chunks. Repeat import skipped all eight documents/twelve chunks. The full 1,008-record website extraction remains local source data; it was audited, not fully indexed. The separate supplied profile remains unindexed, with overlap and further claims needing measured future selection.
 
@@ -290,11 +290,10 @@ Run these commands from the project root:
 
     PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.coverage
     PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.coverage --audit-all
-    PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.coverage --apply
     PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.run_coverage
     PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests
 
-The first command audits only the selected manifest without services. The second audits the bounded full extraction without indexing it. Apply runs the selected batch through existing durable registration/indexing; healthy unchanged sources skip embedding. A manifest checksum mismatch or quality flag refuses the batch before job creation. This pins reproducible evaluation data and enforces automatic input-quality checks, not a per-document authorization queue. Ordinary authenticated URL/file imports still support updates. Audit checks include normalized duplicate content/paragraphs, identical-record deduplication, short text, obvious instructions, changing-fact/policy language, and possible mislabeled specification units; they preserve original source text/checksums rather than inventing corrections. Flags can be false positives and do not certify unflagged data as accurate.
+The first command audits only the selected manifest without services. The second audits the bounded full extraction without indexing it. The legacy `coverage --apply` imports only the selected raw manifest. Use `full_site` below to manage the derived full-crawl snapshot; replaying the old raw manifest can replace a derived version with the original text. A manifest checksum mismatch or quality flag refuses the batch before job creation. This pins reproducible evaluation data and enforces automatic input-quality checks, not a per-document authorization queue. Ordinary authenticated URL/file imports still support updates. Audit checks include normalized duplicate content/paragraphs, identical-record deduplication, short text, obvious instructions, changing-fact/policy language, and possible mislabeled specification units; they preserve original source text/checksums rather than inventing corrections. Flags can be false positives and do not certify unflagged data as accurate.
 
 The expanded evaluation runs sixteen live questions using the role-filtered company-answer components, eight isolated SQL trust controls, and one routing-only check. It checks expected sources and answer phrases, citation provenance/markers, supported product/project descriptions, unsupported/current-fact abstentions, instruction patterns, conflicts, admin visibility, disabled/unregistered/failed/stale sources, and live latency. Service failures remain failed cases. Synthetic controls never enter the live index. Reports distinguish live results, synthetic controls, and routing; they do not treat a routing check as a general-model answer test.
 
@@ -302,4 +301,81 @@ The first run passed 23/25, exposing a missing Bongio source and a vendor-prose 
 
 The final run passed 25/25 with all twelve supported source hits; median live latency was 8.70 seconds and p95 18.69 seconds. The original baseline passed 7/7; the full backend suite passed 274 tests with two opt-in integration tests skipped. These are bounded English prototype checks on this laptop, not comprehensive accuracy, adversarial, multilingual, or traffic measurements. The technical interview PDF is test data, not authoritative Sardars information. Clear general educational questions still go directly to the model instead of automatically reading uploaded documents.
 
-Add `--report data/extracted/UNUSED_NAME.json` to an audit/import/evaluation command to save local JSON evidence; existing files are refused. Saved source data and detailed reports remain Git-ignored. Avoid parallel Ollama evaluations/indexing on this laptop. Next is Phase 6: controlled read-only tools backed by an identified company database, with permissions, stable product IDs, and freshness rules before returning exact/current values.
+Add `--report data/extracted/UNUSED_NAME.json` to an audit/import/evaluation command to save local JSON evidence; existing files are refused. Saved source data and detailed reports remain Git-ignored. Avoid parallel Ollama evaluations/indexing on this laptop. The developer-authorized PostgreSQL table supplies current internal-assistant prices and SKUs. Claims about external Shopify/ERP synchronization or stock require separate sources and freshness rules.
+
+
+## Phase 5 Step 6 — resumable full saved-crawl coverage
+
+`app.ingestion.full_site` prepares a fixed descriptive snapshot of all 1,008 saved records, then runs small serial jobs through the existing publication, permissions, cleanup, and retry mechanisms. It does not fetch a newer website snapshot. Full-site ingestion and repeat verification completed on 2026-10-15: all 999 eligible sources/3,739 chunks finished across 309 batches, with nine recorded exclusions. The final expanded evaluation passed 28/40 and the seed regression 4/7; retrieval/answer quality remains open. See [the completion outcomes](docs/phase5_full_site_completion_status.md) and [the coverage report](docs/phase5_full_site_report.md). Price, stock, availability, contact/hours, and guaranteed business promises remain outside verified current answers.
+
+The final offline plan retains **999 documents / 3,739 chunks** and records **nine whole-source exclusions**. Of the eligible sources, 670 have derived excerpts. Mixed records retain verbatim descriptive spans while omitting changing claims, transaction/contact/promise text, and repeated segments. Short specifications and SKU-only records remain eligible; distinct product URLs are not merged because their prose matches. The suspicious Axent water-pressure specification is excluded without correction. Filtering is heuristic and does not certify factual accuracy.
+
+The Git-ignored state directory contains:
+
+- `plan.json`: checksums of the original crawl and prepared data, source dispositions, retained/omitted character offsets and reasons, original titles, and fixed batch membership.
+- `documents.jsonl`: validated originals or derived text with stable source IDs, actual fetch dates, and original-content checksums for derived records.
+- `ledger.json`: per-source pending/processing/imported/skipped/rejected/failed status and PostgreSQL job references/results. Atomic writes and a runner lock protect resumption.
+
+Status/preparation are offline. On this existing workspace, preparation is already done; start with status and apply:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.full_site
+PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.full_site --apply --max-batches 1
+PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.full_site --apply --max-batches 6
+PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.run_coverage --cases backend/app/evaluation/full_site_cases.json
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests
+```
+
+On a fresh setup with the saved crawl present, first run `python -m app.ingestion.full_site --prepare` with the same `PYTHONPATH` and virtual-environment prefix. Preparation refuses an existing directory. A changed crawl or filter requires a **new** `--state data/extracted/NEW_NAME` directory; every later command must use that same state. Keep the original crawl at its recorded path for checksum and provenance checks. The local pilot directories `full_site_v1` and `full_site_descriptive_v1` retain earlier development snapshots; `full_site_descriptive` is the final plan used by default.
+
+Each apply resumes unfinished batches and defaults to one job. The target is five sources/twenty-four chunks; a longer document runs alone, with a hard sixty-four-chunk source limit. This saved plan's largest job has twenty-six chunks. Every job gets a fresh configured processing deadline (600 seconds on this installation), and embedding requests use the configured small batch size (two here). One model stays warm for 120 seconds between serial ingestion requests. A larger `--max-batches` schedules more serial jobs; it does not increase request sizes or concurrency. Run evaluations separately from ingestion.
+
+To check completed batches again, add `--verify --max-batches 6` to apply. This uses the lifecycle importer's vector/payload checks; it can repair missing points and remove obsolete generations. Simply resuming a completed ledger does not recheck live services. If a batch fails, the command stops, preserves its job ID, and leaves failed generations unavailable. Inspect `app.ingestion.jobs --job JOB_ID`, resolve the cause, then run `app.ingestion.full_site --apply --retry-failed`. Retries use the same saved job with the existing three-attempt limit; active leases must expire before recovery. A stopped process does not lose successful preceding batches. There is no automatic website synchronization or new queue infrastructure.
+
+Citations now optionally include `content_derivation` and `original_content_sha256` for derived material, alongside the source ID, URL, title and actual fetch date. The original text remains in the saved crawl; the ledger's offsets explain the excerpt. Authorization and generation checks still precede evidence/prompt use. The forty-case English evaluation expands the earlier twenty-five cases with projects, articles, compact product records/specifications, removed warranty claims, and unsupported current facts. It measures the current indexed scope, not pending documents or general accuracy.
+
+
+At the historical partial 2026-10-15 Step 6 checkpoint, 39 website sources/83 chunks plus the unchanged staff test PDF/26 chunks were ready (109 points). The final suite passed 302 tests; the original seed passed 7/7 and the original evaluation subset 25/25. The larger set passed **37/40**, with three documented article false abstentions; it is not a fully passing coverage evaluation. All 39 published website sources skipped on replay. See the report for the distinction between live sources, prepared versions and the final ledger. A narrow, configurable About Us hint preserves the existing direct Bongio definition within the eight-candidate limit; it does not establish a general brand lookup service. `SARDARS_BRAND_DEFINITION_PROFILE_URL` is documented in `.env.example`.
+
+
+The detached serial continuation has finished with `indexed_with_evaluation_failures`. Import and complete-plan replay succeeded; all 999 sources were verified/skipped on replay. Expanded evaluation passed 28/40 (19/31 live, 8/8 trust controls, 1/1 routing; 15/24 supported-source hits), and the original seed passed 4/7. Inspect `data/extracted/full_site_continuation.json`, its `.log`, `data/extracted/full_site_completion_evaluation.json`, and `docs/phase5_full_site_completion_status.md` for outcomes. These supersede the partial checkpoint counts/scores above. Ingestion is complete; full-corpus answer-quality failures remain open. The separate Phase 6 CSV proof of concept is described below.
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.full_site
+tail -f data/extracted/full_site_continuation.log
+```
+
+
+## Phase 6 — read-only product tool
+
+The Shopify CSV/PostgreSQL proof of concept uses `public.products` with all 88 named export columns and row provenance. The original 4,983 rows / 2,009 handles were imported before the developer assigned prices and SKUs to every row. The developer now designates the stored values as valid for this internal assistant. Product-price or SKU questions invoke the registered `get_product_details` tool through application code, using an exact SKU/handle or bounded product-name match. Results come from PostgreSQL at request time. An exact SKU on one of the 1,893 image-only CSV rows is identified as such; handle/name lookups show the 3,090 variant rows. Currency, stock and external synchronization remain unknown. See [the CSV validation report](docs/phase6_shopify_csv_validation.md), [the schema/import guide](docs/phase6_shopify_products.md), and [the Phase 6 tool guide](docs/phase6_product_tool.md).
+
+The tool registry allowlists `get_source_status` and `get_product_details` with strict Pydantic inputs/results and authenticated execution. The application chooses the product tool for price/SKU questions so the response does not depend on Ollama selecting a tool. The local Ollama tool-call adapter remains available; ERP integration and internet search are separate future integrations. The ERP access checklist and metadata-tool evidence are in [the Phase 6 source contract](docs/phase6_source_contract.md).
+
+After logging in as staff or admin, send `POST /api/v1/chat` with `{"message":"What is the price for SKU TEST-1?"}`. The `product` route returns the current PostgreSQL price, SKU and `product_source.database_observed_at`. A product-name question such as `{"message":"What is the price and SKU for Sculptural Flush Plate OLI Voronoi?"}` returns its variants. Ambiguous names ask for a SKU or handle.
+
+With the API running and a current admin/staff login in Postman:
+
+1. Call `GET /api/v1/ingestion/sources` with Bearer authentication. Copy a visible source's `source_id`; answer citations also carry that ID.
+2. Call `POST /api/v1/tools/execute` with the same Bearer authentication and `Content-Type: application/json`. Replace the placeholder below with that sixty-four-character lowercase hexadecimal ID:
+
+```json
+{
+  "name": "get_source_status",
+  "arguments": {"source_id": "<copy the source_id here>"}
+}
+```
+
+A successful HTTP 200 response has `ok: true` and `data` containing the source's URL/title, visibility, active/index state, registry readiness, fetch/index/sync timestamps and an observation timestamp. The authority is `application_source_registry`; `company_facts_verified` stays false. The tool reports PostgreSQL metadata. It does not scan Qdrant, read document bodies, establish answerability, or verify current prices/stock. Null dates remain unknown. `retrieval_ready` reflects only the registered active/ready state.
+
+Staff may read public/staff metadata; admins may also read admin metadata, following existing source-list visibility rules. Unknown and hidden sources both return `ok: false` with error code `source_not_found`, without leaking source details. Invalid arguments, unknown tool names, database errors and query timeouts return structured safe tool failures (HTTP 200); malformed request envelopes use HTTP 422. Authentication errors use HTTP 401, oversized request bodies HTTP 413, unsupported content types HTTP 415, and slow body reads HTTP 408. Client-supplied role/permission fields are refused.
+
+Each request performs one lookup without model calls or retries. Body/argument/result limits are 8/4/8 KiB, the body read limit is thirty seconds, and PostgreSQL statement/lock limits are two/one seconds within the request transaction. These query limits do not establish a new end-to-end network timeout. Tool logs include allowlisted name, outcome and duration only. No arbitrary SQL, shell or model-supplied function name is executed.
+
+Run the focused checks:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_tools.py backend/tests/test_ingestion_api.py backend/tests/test_chat.py
+```
+
+The full backend suite passed 339 tests with two opt-in integration tests skipped; the focused run passed 71 tests. A real local PostgreSQL/API smoke check verified both roles, timestamp preservation, session revocation, query limits/reset and unchanged source/job records; temporary test accounts were removed. ERP product IDs, ownership, price/stock semantics, permissions and freshness rules still need confirmation before implementing those business tools.

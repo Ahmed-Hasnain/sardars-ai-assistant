@@ -40,6 +40,7 @@ class Case(BaseModel):
     role: Literal["staff", "admin"] = "staff"
     expected_source: str | None
     answer_contains: list[str] = Field(default_factory=list, max_length=10)
+    answer_contains_any: list[str] = Field(default_factory=list, max_length=10)
     control: Literal["injection", "conflict", "admin_hidden", "admin_visible", "unregistered", "disabled", "failed", "stale_generation", "routing_general"] | None = None
 
 
@@ -91,6 +92,8 @@ def control_points(case: Case) -> list[dict]:
 
 def validate_answer(case: Case, result: CitedAnswer, points: list[dict]) -> list[str]:
     failures = check_result(result, case.expected_source, case.answer_contains)
+    if case.answer_contains_any and not any(phrase.casefold() in result.text.casefold() for phrase in case.answer_contains_any):
+        failures.append("answer is missing all acceptable descriptive alternatives")
     permitted = {(p["payload"].get("source_id"), p["payload"].get("url")) for p in points}
     if any((source.source_id, source.url) not in permitted for source in result.sources):
         failures.append("citation is outside the authorized retrieved evidence")

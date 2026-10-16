@@ -19,6 +19,14 @@ MAX_DOCUMENT_CHARS = 50_000
 MAX_DOCUMENT_WORDS = 10_000
 
 
+class DescriptiveDerivation(BaseModel):
+    """Link an exact excerpt to its retained original crawler snapshot."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    method: Literal["descriptive_spans_v1"]
+    original_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class WebsiteDocument(BaseModel):
     """The current crawler format; preserve exact text for checksum comparison."""
 
@@ -33,6 +41,7 @@ class WebsiteDocument(BaseModel):
     fetched_at: AwareDatetime
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     text: str = Field(min_length=1, max_length=MAX_DOCUMENT_CHARS)
+    derivation: DescriptiveDerivation | None = None
 
     @field_validator("fetched_at", mode="before")
     @classmethod

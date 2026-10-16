@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,7 @@ from app.rag.routing import route_question
 from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.company_answer import answer_company
+from app.services.product_answer import PRODUCT_INTENT, answer_product
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
@@ -33,6 +35,11 @@ async def chat(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatResponse:
+    if route_question(request.message) == "company" and PRODUCT_INTENT.search(request.message):
+        try:
+            return await asyncio.wait_for(answer_product(request.message, user, db), timeout=10)
+        except asyncio.TimeoutError:
+            return ChatResponse(answer="Product lookup timed out.", route="product", model=None)
     if route_question(request.message) == "company":
         try:
             answer = await answer_company(request.message, user.role, db, chat_model)

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     ollama_keep_alive: int = 0
 
     qdrant_base_url: str = "http://127.0.0.1:6333"
+    brand_definition_profile_url: str | None = "https://sardarandco.com/pages/about-us"
     import_timeout_seconds: float = Field(default=300, gt=0, le=600)
     embedding_batch_size: int = Field(default=2, ge=1, le=8)
     ingestion_storage_dir: Path = Path("data/uploads")

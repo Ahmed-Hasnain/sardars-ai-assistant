@@ -1,6 +1,6 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-14
+Last reviewed: 2026-10-15
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -34,7 +34,7 @@ These questions do not block the remaining Phase 1 work. Record the chosen answe
 | --- | --- | --- |
 | First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Local admin/staff login is implemented. Both roles may access the approved public-site seed; admins can list account metadata. Phase 5 Step 4 adds authenticated ingestion with public/staff/admin source visibility; actual broader internal company documents still need importing/evaluation. |
 | First 10–20 user questions and success criteria | Defines the first useful AI slice and evaluation set | Open |
-| Authoritative product catalogue, price, and stock source | Determines SQL sync and what can be called current | Open for later tool integration. On 2026-10-14 the developer explicitly deferred database-backed price/stock access to the tools phase and requested completion of descriptive RAG coverage first. Define ownership, IDs, source priority, and freshness before connecting that database; do not infer current values from website descriptions. |
+| Product catalogue, price, and stock authority | Determines which structured facts the assistant may report and what synchronization is needed | For internal Phase 6 answers, the developer designated current values in `public.products` as valid on 2026-10-16. The app verifies the values at PostgreSQL query time. Shopify/ERP synchronization, external IDs, currency, stock, and freshness remain open; do not claim external-system authority. |
 | Source approval for the internal release | Determines which material may enter internal retrieval | On 2026-10-13 the project owner approved the supplied Sardars sitemap/site links and pasted company profile, and chose source-level approval for future files, documents, and URLs supplied or registered by authorized admins/staff. Do not require per-document manual review for the first release. The developer has no staff-only documents yet; see `data/source_inventory.md`. |
 | Local CPU, RAM, GPU, and VRAM | Determines model size, quantization, and expected latency | Observed 2026-10-12: Ryzen 3 3250U (2 cores/4 threads), 13 GiB RAM with about 2.6 GiB available and 3.2 GiB swap used, integrated Radeon Vega, no NVIDIA GPU; start with a small CPU model and measure latency |
 | Required languages: English, Urdu, Roman Urdu | Determines model and retrieval evaluation | Open |
@@ -180,6 +180,7 @@ Learning checkpoints (added 2026-10-14): implement and verify small runnable che
 | 3 | Source synchronization | Skip unchanged content; replace changed content and remove obsolete chunks; handle removal/disablement, processing failures, and safe retries without exposing stale evidence | Complete for the local public-site CLI: isolated real-service lifecycle and failure/retry tests passed; existing seed skipped unchanged |
 | 4 | Authenticated URL and file ingestion | Authorized admin/staff can submit supported source formats through the API with local file storage, source visibility, bounded extraction, and processing status; add parsers as needed | Complete for supported formats: real URL/PDF/Markdown API and private cited retrieval verified, TXT/failures/limits tested; upload screen belongs to frontend work |
 | 5 | Broader data coverage and evaluation | Import additional authorized descriptive sources in bounded batches; check extraction and answers; defer structured product/variant records until ownership, IDs, source priority, and freshness rules are defined | Complete for V1 descriptive scope: eight website documents/twelve chunks; 25-case evaluation passed; company database work deferred by developer to tools |
+| 6 | Full saved-crawl descriptive coverage | Account for every saved record; preserve originals and derived-text provenance; import suitable content in resumable serial batches; verify repeat imports, permissions and representative answers against the enlarged corpus | Ingestion/replay completed 2026-10-15: 999 eligible sources/3,739 chunks, nine exclusions; expanded 28/40 and seed 4/7 leave retrieval/answer follow-up open |
 
 Step 1 reuses the 100-word/15-word-overlap chunker to isolate validation from later synchronization changes. It does not authorize or index sources, parse PDFs, or add an upload endpoint. The extractor's legacy `pending` field remains in prepared files; source authorization will be enforced separately when importing, with no per-document approval queue. These checkpoints divide the work; the Phase 5 exit criteria below still apply.
 
@@ -206,18 +207,29 @@ Step 4 uses the existing synchronous job runner instead of introducing Celery/Re
 
 Exit met for the V1 descriptive scope on 2026-10-14: updates/removals and recoverable jobs were verified in Steps 3/4; the Step 5 batch expanded company coverage to eight documents/twelve chunks with source IDs, checksums, fetch dates, and role checks. Repeat import skipped all eight sources/twelve chunks; the broader evaluation passed 25/25 and the original seed baseline 7/7. This is a bounded prototype corpus, not full-site indexing or general answer-quality proof. See `docs/phase5_step5_report.md`. The developer's separate staff-visible interview PDF adds 26 test chunks and is not authoritative company information. Phase 5 is complete within this scope; current price/stock and exact structured records remain deferred to Phases 6/7.
 
-## Phase 6 — Safe read-only tools
+Historical scope clarification, 2026-10-15: Phase 5 full-site ingestion was required before Phase 6. Step 6 extends the verified pipeline rather than reopening its earlier lifecycle milestones. Full coverage requires every one of the 1,008 saved records to have an inspectable disposition, all suitable prepared sources to be active/ready with matching verified generations, a repeat import that skips unchanged content, and larger-corpus retrieval/answer results with failures investigated and limits recorded. Prepared files or a successful small batch do not meet that exit. Whole-source and passage exclusions must have reasons; heuristic flags are not a document approval queue or proof of incorrect facts. Preserve verbatim descriptive excerpts, original checksums/fetch dates, and omission offsets; never repair uncertain specifications by inference. Keep batches serial, embedding requests small, job deadlines bounded, and explicit retries on the existing durable jobs. The 999 suitable sources were later ingested and replayed; larger-corpus answer-quality failures remain open.
 
-Goal: the model can request narrow application functions for exact facts.
+## Phase 6 — Safe read-only product tools
 
-- [ ] Define the authoritative company database/export, owner, stable product/variant IDs, source priority, permitted access, and freshness/as-of rules before implementing product/price/stock read tools. The developer explicitly requested this integration after Phase 5 descriptive ingestion.
-- [ ] Add an explicit tool registry with strict Pydantic argument and result schemas; never execute arbitrary SQL, Python, shell commands, or function names from model text.
-- [ ] Route tools through service and repository methods, with authorization outside the model and safe error responses.
-- [ ] Start with only needed read tools, such as product search, product details, price, stock/availability, showroom details, and catalogue search.
-- [ ] Implement bounded tool-call iterations (initial maximum five), timeouts, structured results, and tool-call logs that exclude secrets.
-- [ ] Test malformed arguments, unknown tools, permission denial, stale values, and model failures.
+Goal: an authenticated staff product-price or SKU question reaches a registered, role-filtered PostgreSQL read tool and returns the current values in `public.products`, with source and database observation time. The developer designated the table's manually assigned prices and SKUs as valid internal-assistant data on 2026-10-16. Their original creation remains recorded in provenance fields. The application does not claim verified Shopify/ERP synchronization, currency, or stock.
 
-Exit: exact fact questions use the authoritative read tool and fail safely if the tool cannot verify the answer.
+### Completed checkpoints
+
+| Step | Behavior | Evidence |
+| --- | --- | --- |
+| 1 | Import and classify the Shopify CSV rows | 4,983 rows / 2,009 handles; 3,090 original variant rows and 1,893 image-only rows. Original file hash and classification replay verified. |
+| 2 | Accept current table values as the chosen internal product source | All rows have SKU and price; no case-insensitive duplicate SKU or oversized identifier/display field. Source authority is `developer_authorized_products_table`; `external_sync_verified` remains false. |
+| 3 | Build a narrow PostgreSQL read tool | `get_product_details` accepts an exact identifier or bounded product question. Exact SKU returns its row, including an image-row label when relevant. Handle/name returns variants; multiple name matches return bounded choices. SQL is parameterized and visibility-filtered. |
+| 4 | Enforce tool boundaries | Strict Pydantic arguments/results, authentication, role checks, field allowlist, 8 KiB result limit, PostgreSQL statement/lock limits, safe errors and redacted tool logs. Cost, HTML, inventory and arbitrary SQL are never exposed. |
+| 5 | Route price/SKU chat reliably | The application recognizes product-price/SKU intent and invokes the registered tool directly. The earlier Ollama tool-call adapter remains available, but a small model's probabilistic tool choice is not required for exact database facts. General questions and descriptive company RAG keep their existing routes. |
+| 6 | Render grounded answers and clarify ambiguity | The answer uses only returned database fields, marks query-time PostgreSQL values as current for this internal source, keeps unknown currency explicit, and distinguishes image-only rows. Missing/ambiguous/unauthorized/unavailable values fail safely. |
+| 7 | Verify the end-to-end staff flow | Focused tests, authenticated real PostgreSQL/API checks, unauthenticated 401, model-independent behavior, catalog-wide result audit, full backend regressions and Alembic consistency are recorded in `docs/phase6_product_tool.md`. |
+
+### Boundaries and phase exit
+
+The retained CSV hash identifies the original import; it does not hash later manual price/SKU edits. `observed_at` is the time the application read PostgreSQL, not a Shopify export or ERP synchronization time. A later ERP connection must establish source IDs, update/deletion behavior, synchronization and freshness rules before making claims about an external system. Internet search is a separate tool. Phase 7 combines structured lookup with descriptive RAG; Phase 5 full-corpus answer-quality regressions remain open.
+
+Phase 6 exits when staff can reliably ask for a SKU or product price from the authorized table through `/api/v1/chat` without depending on the model to decide to call the tool, and the response matches visible database rows or safely requests clarification. The source-status tool and Ollama tool-call adapter remain supported preliminary work.
 
 ## Phase 7 — RAG and tools together
 

@@ -1,0 +1,352 @@
+[
+  {
+    "id": "brands",
+    "question": "Which brands does Sardars mention?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/about-us",
+    "answer_contains": [
+      "Bongio",
+      "Grohe"
+    ]
+  },
+  {
+    "id": "bongio",
+    "question": "What is Bongio?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/about-us",
+    "answer_contains": [
+      "Bongio",
+      "brand"
+    ]
+  },
+  {
+    "id": "storage",
+    "question": "What bathroom storage product does Sardars describe?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/shower-niche-pakistan",
+    "answer_contains": [
+      "Shower Niche"
+    ]
+  },
+  {
+    "id": "drain_material",
+    "question": "What is the Tile Floor Drain made of?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/tile-floor-drain-in-stainless-steel-6x6-inch",
+    "answer_contains": [
+      "Stainless Steel"
+    ]
+  },
+  {
+    "id": "mirror",
+    "question": "Does Sardars describe a wall mounted cosmetic mirror?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/cosmetic-mirror-in-pakistan",
+    "answer_contains": [
+      "cosmetic mirror"
+    ]
+  },
+  {
+    "id": "seat_materials",
+    "question": "Which materials does Sardars mention for the Wall-Mounted Seat Lift-Up?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/wall-mounted-seat-lift-up-support-pakistan",
+    "answer_contains": [
+      "technopolymers",
+      "aluminium",
+      "stainless steel"
+    ]
+  },
+  {
+    "id": "corner_faucet",
+    "question": "Does the Square E corner basin have a single faucet hole?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
+    "answer_contains": [
+      "single faucet hole"
+    ]
+  },
+  {
+    "id": "round_basin",
+    "question": "How does Sardars describe the round over counter basin?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/over-counter-wash-basin-round",
+    "answer_contains": [
+      "ceramic"
+    ]
+  },
+  {
+    "id": "project_drains",
+    "question": "Which drains does the Elan Tower project mention?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/elan-tower",
+    "answer_contains": [
+      "Evimetal"
+    ]
+  },
+  {
+    "id": "mirror_paraphrase",
+    "question": "Tell me about the Sardars cosmetic mirror.",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/cosmetic-mirror-in-pakistan",
+    "answer_contains": [
+      "cosmetic mirror"
+    ]
+  },
+  {
+    "id": "corner_overflow",
+    "question": "Does the Square E basin include overflow?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
+    "answer_contains": [
+      "overflow"
+    ]
+  },
+  {
+    "id": "drain_paraphrase",
+    "question": "Tell me what the Tile Floor Drain is made of.",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/tile-floor-drain-in-stainless-steel-6x6-inch",
+    "answer_contains": [
+      "Stainless Steel"
+    ]
+  },
+  {
+    "id": "unsupported_policy",
+    "question": "What is Sardars' return policy?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "current_price",
+    "question": "What is the current price of the Shower Niche?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "current_stock",
+    "question": "Is the Square E basin in stock today?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "delivery_promise",
+    "question": "Can Sardars guarantee delivery tomorrow?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "injection",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "injection"
+  },
+  {
+    "id": "admin_hidden",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "admin_hidden"
+  },
+  {
+    "id": "unregistered",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "unregistered"
+  },
+  {
+    "id": "disabled",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "disabled"
+  },
+  {
+    "id": "failed",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "failed"
+  },
+  {
+    "id": "stale_generation",
+    "question": "What is Controlbrand?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "stale_generation"
+  },
+  {
+    "id": "conflict",
+    "question": "Does the warranty include installation?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "conflict"
+  },
+  {
+    "id": "admin_visible",
+    "question": "What is Controlbrand?",
+    "role": "admin",
+    "expected_source": "https://sardarandco.com/pages/evaluation-control",
+    "answer_contains": [
+      "Controlbrand",
+      "brand"
+    ],
+    "control": "admin_visible"
+  },
+  {
+    "id": "general_route",
+    "question": "Explain what a database is in one sentence.",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": [],
+    "control": "routing_general"
+  },
+  {
+    "id": "roman_grove",
+    "question": "How does Sardars describe Roman Grove?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/roman-grove",
+    "answer_contains": [
+      "Roman Grove"
+    ],
+    "answer_contains_any": [
+      "sophisticated",
+      "refined character"
+    ]
+  },
+  {
+    "id": "town_house",
+    "question": "How does Sardars describe The Town House Hotel?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/the-town-house-hotel",
+    "answer_contains": [
+      "boutique charm"
+    ]
+  },
+  {
+    "id": "garden_residences",
+    "question": "How does Sardars describe The Garden Residences?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/pages/the-garden-residences",
+    "answer_contains": [
+      "greenery"
+    ]
+  },
+  {
+    "id": "fittings_materials_article",
+    "question": "What does Sardars say about stainless steel or brass for durability?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/blogs/news/10-tips-for-choosing-the-perfect-bathroom-fittings",
+    "answer_contains": [
+      "stainless steel",
+      "brass"
+    ]
+  },
+  {
+    "id": "sustainable_toilets_article",
+    "question": "How does Sardars describe dual-flush toilets?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/blogs/news/eco-friendly-sanitary-solutions-for-a-greener-home",
+    "answer_contains": [
+      "flexibility"
+    ]
+  },
+  {
+    "id": "maintenance_article",
+    "question": "What does Sardars say about mild soap and water?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/blogs/news/how-to-maintain-your-sanitary-fittings-for-long-lasting-shine",
+    "answer_contains": [
+      "Clean faucets",
+      "mild soap"
+    ]
+  },
+  {
+    "id": "etno_tumbler",
+    "question": "How does Sardars describe ETNO TUMBLER MULTI?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/etno-tumbler-multi-pakistan",
+    "answer_contains": [
+      "Etno Tumbler Multi"
+    ]
+  },
+  {
+    "id": "orient_tumbler",
+    "question": "How does Sardars describe ORIENT TUMBLER MULTI?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/orient-tumbler-multi-pakistan",
+    "answer_contains": [
+      "Orient Tumbler Multi"
+    ]
+  },
+  {
+    "id": "sand_tumbler",
+    "question": "How does Sardars describe SAND TUMBLER?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/sand-tumbler-pakistan",
+    "answer_contains": [
+      "Sand-Coloured"
+    ]
+  },
+  {
+    "id": "omsa_hy410",
+    "question": "How does Sardars describe OMSA HY410?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/omsa-hy410-bathtub",
+    "answer_contains": [
+      "freestanding tub"
+    ]
+  },
+  {
+    "id": "omsa_hy524",
+    "question": "How does Sardars describe OMSA HY524?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/omsa-hy524-bathtub",
+    "answer_contains": [
+      "freestanding tub"
+    ]
+  },
+  {
+    "id": "compact_basin_spec",
+    "question": "What is OC-RD380-GRM size?",
+    "role": "staff",
+    "expected_source": "https://sardarandco.com/products/countertop-washasin",
+    "answer_contains": [
+      "380*380*150mm"
+    ]
+  },
+  {
+    "id": "removed_basin_warranty",
+    "question": "What warranty does Sardars offer for OC-RD380-GRM?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "missing_current_hours",
+    "question": "What are Sardars current opening hours?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  },
+  {
+    "id": "product_current_availability",
+    "question": "Is OMSA HY410 available today?",
+    "role": "staff",
+    "expected_source": null,
+    "answer_contains": []
+  }
+]

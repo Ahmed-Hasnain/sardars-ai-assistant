@@ -7,6 +7,8 @@ class SourceCitation(BaseModel):
     title: str
     url: str
     fetched_at: str | None
+    content_derivation: str | None = None
+    original_content_sha256: str | None = None
 
 
 class AskResponse(BaseModel):
