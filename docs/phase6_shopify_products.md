@@ -1,6 +1,6 @@
 # Phase 6 — Shopify CSV database proof of concept
 
-Scope agreed 2026-10-16: use the developer's Sardars Shopify product export as a dated database snapshot. ERP access is unavailable and is not required for this proof of concept. Demonstrate one controlled product lookup from PostgreSQL, then verify model tool calling. This is not a live price/inventory integration.
+Initial scope agreed 2026-10-16: use the developer's Sardars Shopify export as a database snapshot while ERP access is unavailable. The scope was later expanded: the developer designated current PostgreSQL prices and SKUs as valid for internal assistant answers, and Phase 6 now routes staff product questions through a registered read tool. This remains separate from verified Shopify/ERP synchronization, currency, or inventory.
 
 This page records the **initial import checkpoint**. All **4,983 CSV rows / 2,009 handles** were committed in `public.products`; replay skipped all 4,983. At that checkpoint, the original 15 populated SKUs and exported prices were unchanged. The developer later edited SKUs and prices, then designated the current table values as valid for internal-assistant product answers. The current authority, classification and read tool are documented in [the Phase 6 product-tool guide](phase6_product_tool.md). Export/as-of time and currency remain unknown.
 
@@ -8,7 +8,7 @@ This page records the **initial import checkpoint**. All **4,983 CSV rows / 2,00
 
 `public.products` stores one CSV data record per database row. The supplied header has **88 named columns**, all represented. The two unnamed trailing spreadsheet columns are ignored. SQL identifiers use lowercase snake case; `Product` column `info.csv_header` and `SHOPIFY_COLUMN_MAP` retain exact original header spelling, including long metafield names. `Type` maps to `product_type`, `Body (HTML)` to `body_html`, and long discovery/metafield names have shorter unambiguous SQL names.
 
-Shopify can represent one product with multiple rows for variants and extra images. Handles and SKUs are indexed but **not unique**. Continuation rows may have null titles, prices, SKUs and other fields. Do not interpret every row as a distinct product or fill missing values with invented defaults. A future lookup must group/disambiguate variants and avoid treating an image-only row as a sellable variant. The supplied schema has no Shopify product/variant ID; local `id` is a row identifier, not an external product identity.
+Shopify can represent one product with multiple rows for variants and extra images. Handles and SKUs are indexed but **not unique**. Continuation rows may have null titles, prices, SKUs and other fields. Do not interpret every row as a distinct product or fill missing values with invented defaults. The current tool groups variants and labels image-only rows; see the [Phase 6 product-tool guide](phase6_product_tool.md) for its behavior. The supplied schema has no Shopify product/variant ID; local `id` is a row identifier, not an external product identity.
 
 | Data | Storage |
 | --- | --- |
