@@ -100,6 +100,41 @@ def search_for_role(question: str, role: str) -> list[dict]:
     )
 
 
+def fetch_product_points(urls: list[str], role: str) -> list[dict]:
+    """Fetch only exact product URLs; caller still runs PostgreSQL authorization."""
+    visibility = ALLOWED_VISIBILITIES.get(role)
+    if not visibility or len(urls) > 3:
+        return []
+    settings = Settings()
+    points: list[dict] = []
+    with httpx.Client(timeout=min(settings.ollama_timeout_seconds, 10.0)) as client:
+        for url in urls:
+            response = client.post(
+                f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll",
+                json={
+                    "filter": {
+                        "must": [
+                            {"key": "url", "match": {"value": url}},
+                            {"key": "source_type", "match": {"value": "products"}},
+                            {"key": "review_status", "match": {"value": "approved"}},
+                            {"key": "prototype_only", "match": {"value": False}},
+                        ],
+                        "should": [{"key": "visibility", "match": {"value": value}}
+                                   for value in sorted(visibility)],
+                    },
+                    "limit": 16,
+                    "with_payload": True,
+                    "with_vector": False,
+                },
+            )
+            response.raise_for_status()
+            batch = response.json()["result"]["points"]
+            if not isinstance(batch, list) or len(batch) > 16 or any(not isinstance(p, dict) for p in batch):
+                raise ValueError("Unexpected product retrieval response")
+            points.extend(batch)
+    return points
+
+
 def search_prototype(question: str) -> list[dict]:
     return _query(
         question,

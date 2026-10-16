@@ -13,9 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models import User
 from app.services.product_lookup import AmbiguousSku, TooManyVariants, get_product_details
+from app.services.product_search import search_products
 from app.services.source_status import get_source_status
 from app.tools.schemas import (
-    ProductArguments, SourceStatusArguments, ToolError, ToolFailure, ToolInvocation, ToolResult, ToolSuccess,
+    ProductArguments, ProductSearchArguments, SourceStatusArguments, ToolError, ToolFailure,
+    ToolInvocation, ToolResult, ToolSuccess,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,12 @@ TOOLS: Mapping[str, ReadTool] = MappingProxyType({
         "Currency and external synchronization status are unknown; stock is not verified.",
         frozenset({"staff", "admin"}),
     ),
+    "search_products": ReadTool(
+        "search_products",
+        "Search visible PostgreSQL products by brand, category, finish, price and exact identifiers. "
+        "Returns bounded exact prices and SKUs. Currency and stock are unverified unless recorded.",
+        frozenset({"staff", "admin"}),
+    ),
 })
 
 
@@ -66,15 +74,23 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
     if argument_bytes > MAX_ARGUMENT_BYTES:
         return _failure(call.name, "invalid_arguments", "Invalid tool arguments")
     try:
-        arguments = (SourceStatusArguments if call.name == "get_source_status" else ProductArguments).model_validate(call.arguments)
+        argument_type = {
+            "get_source_status": SourceStatusArguments,
+            "get_product_details": ProductArguments,
+            "search_products": ProductSearchArguments,
+        }[call.name]
+        arguments = argument_type.model_validate(call.arguments)
     except ValidationError:
         return _failure(call.name, "invalid_arguments", "Invalid tool arguments")
     try:
         if call.name == "get_source_status":
             data = get_source_status(db, user, arguments.source_id)
             missing = "source_not_found"
-        else:
+        elif call.name == "get_product_details":
             data = get_product_details(db, user.role, arguments)
+            missing = "product_not_found"
+        else:
+            data = search_products(db, user.role, arguments)
             missing = "product_not_found"
         if data is None:
             return _failure(call.name, missing, "Source not found" if missing == "source_not_found" else "Product not found")

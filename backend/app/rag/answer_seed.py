@@ -55,7 +55,8 @@ SYSTEM_PROMPT = (
     "the excerpts. Put a source marker such as [1] after each factual claim. "
     f"If the excerpts do not directly answer the question, reply exactly: {FALLBACK} "
     "Do not use general knowledge to fill gaps in company facts."
-)
+)    return CitedAnswer(FALLBACK, [])
+
 
 
 @dataclass(frozen=True)

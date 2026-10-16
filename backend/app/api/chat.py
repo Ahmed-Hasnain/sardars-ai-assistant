@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,7 @@ from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.company_answer import answer_company
 from app.services.product_answer import PRODUCT_INTENT, answer_product
+from app.services.product_discovery import answer_product_discovery
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
@@ -27,6 +29,8 @@ SYSTEM_PROMPT = (
 )
 
 chat_model: ChatModel = OllamaChatModel(Settings())
+DISCOVERY_INTENT = re.compile(r"\b(?:recommend|suggest|compare|comparison|difference|cheaper|under|below|over|above|less than|more than|which is better|which one)\b", re.I)
+PRODUCT_DOMAIN = re.compile(r"\b(?:products?|catalogue|catalog|sku|basin|mixer|faucet|tap|toilet|shower|sink|bath|vanity|tile|flush|plate)\b", re.I)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -35,6 +39,16 @@ async def chat(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ChatResponse:
+    if route_question(request.message) == "company" and (
+        request.product_handles or
+        (DISCOVERY_INTENT.search(request.message) and PRODUCT_DOMAIN.search(request.message))
+    ):
+        try:
+            return await asyncio.wait_for(
+                answer_product_discovery(request.message, user, db, request.product_handles), timeout=35,
+            )
+        except asyncio.TimeoutError:
+            return ChatResponse(answer="Product search timed out.", route="product_search", model=None)
     if route_question(request.message) == "company" and PRODUCT_INTENT.search(request.message):
         try:
             return await asyncio.wait_for(answer_product(request.message, user, db), timeout=10)
