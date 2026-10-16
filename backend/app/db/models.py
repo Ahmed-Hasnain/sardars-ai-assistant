@@ -6,6 +6,7 @@ from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKe
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.products import Product  # noqa: F401 - register the product snapshot table
 
 
 class User(Base):
