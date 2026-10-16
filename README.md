@@ -306,7 +306,7 @@ Add `--report data/extracted/UNUSED_NAME.json` to an audit/import/evaluation com
 
 ## Phase 5 Step 6 — resumable full saved-crawl coverage
 
-`app.ingestion.full_site` prepares a fixed descriptive snapshot of all 1,008 saved records, then runs small serial jobs through the existing publication, permissions, cleanup, and retry mechanisms. It does not fetch a newer website snapshot. Full-site indexing is still in progress; see [the coverage report](docs/phase5_full_site_report.md) for measured coverage and evaluation limits. Price, stock, availability, contact/hours, and guaranteed business promises remain outside verified current answers.
+`app.ingestion.full_site` prepares a fixed descriptive snapshot of all 1,008 saved records, then runs small serial jobs through the existing publication, permissions, cleanup, and retry mechanisms. It does not fetch a newer website snapshot. Full-site ingestion and repeat verification completed on 2026-10-15: all 999 eligible sources/3,739 chunks finished across 309 batches, with nine recorded exclusions. The final expanded evaluation passed 28/40 and the seed regression 4/7; retrieval/answer quality remains open. See [the completion outcomes](docs/phase5_full_site_completion_status.md) and [the coverage report](docs/phase5_full_site_report.md). Price, stock, availability, contact/hours, and guaranteed business promises remain outside verified current answers.
 
 The final offline plan retains **999 documents / 3,739 chunks** and records **nine whole-source exclusions**. Of the eligible sources, 670 have derived excerpts. Mixed records retain verbatim descriptive spans while omitting changing claims, transaction/contact/promise text, and repeated segments. Short specifications and SKU-only records remain eligible; distinct product URLs are not merged because their prose matches. The suspicious Axent water-pressure specification is excluded without correction. Filtering is heuristic and does not certify factual accuracy.
 
@@ -335,12 +335,43 @@ To check completed batches again, add `--verify --max-batches 6` to apply. This 
 Citations now optionally include `content_derivation` and `original_content_sha256` for derived material, alongside the source ID, URL, title and actual fetch date. The original text remains in the saved crawl; the ledger's offsets explain the excerpt. Authorization and generation checks still precede evidence/prompt use. The forty-case English evaluation expands the earlier twenty-five cases with projects, articles, compact product records/specifications, removed warranty claims, and unsupported current facts. It measures the current indexed scope, not pending documents or general accuracy.
 
 
-At the verified 2026-10-15 Step 6 checkpoint, 39 website sources/83 chunks plus the unchanged staff test PDF/26 chunks were ready (109 points). The final suite passed 302 tests; the original seed passed 7/7 and the original evaluation subset 25/25. The larger set passed **37/40**, with three documented article false abstentions; it is not a fully passing coverage evaluation. All 39 published website sources skipped on replay. See the report for the distinction between live sources, prepared versions and the final ledger. A narrow, configurable About Us hint preserves the existing direct Bongio definition within the eight-candidate limit; it does not establish a general brand lookup service. `SARDARS_BRAND_DEFINITION_PROFILE_URL` is documented in `.env.example`.
+At the historical partial 2026-10-15 Step 6 checkpoint, 39 website sources/83 chunks plus the unchanged staff test PDF/26 chunks were ready (109 points). The final suite passed 302 tests; the original seed passed 7/7 and the original evaluation subset 25/25. The larger set passed **37/40**, with three documented article false abstentions; it is not a fully passing coverage evaluation. All 39 published website sources skipped on replay. See the report for the distinction between live sources, prepared versions and the final ledger. A narrow, configurable About Us hint preserves the existing direct Bongio definition within the eight-candidate limit; it does not establish a general brand lookup service. `SARDARS_BRAND_DEFINITION_PROFILE_URL` is documented in `.env.example`.
 
 
-The remaining import was launched as a detached local serial command on 2026-10-15. Inspect `data/extracted/full_site_continuation.json` and `data/extracted/full_site_continuation.log` for its current status. It stops on import/verification failure, preserving durable job references; it does not retry failures automatically. After successful indexing it replays the completed plan and runs the expanded and original evaluations sequentially. Results go to `data/extracted/full_site_completion_evaluation.json` and, after those commands finish, `docs/phase5_full_site_completion_status.md`. These future outcomes are not included in the verified checkpoint counts above. Avoid starting another ingestion/evaluation workload while it runs.
+The detached serial continuation has finished with `indexed_with_evaluation_failures`. Import and complete-plan replay succeeded; all 999 sources were verified/skipped on replay. Expanded evaluation passed 28/40 (19/31 live, 8/8 trust controls, 1/1 routing; 15/24 supported-source hits), and the original seed passed 4/7. Inspect `data/extracted/full_site_continuation.json`, its `.log`, `data/extracted/full_site_completion_evaluation.json`, and `docs/phase5_full_site_completion_status.md` for outcomes. These supersede the partial checkpoint counts/scores above. Ingestion is complete; neither full-corpus answer quality nor Phase 6 is declared complete.
 
 ```bash
 PYTHONPATH=backend backend/.venv/bin/python -m app.ingestion.full_site
 tail -f data/extracted/full_site_continuation.log
 ```
+
+
+## Phase 6 — first read-only application tool
+
+The first checkpoint adds an explicit allowlist containing `get_source_status`, strict Pydantic inputs/results and authenticated **single-tool execution**. Model tool calling and ERP integration are later checkpoints. The ERP access checklist and verification evidence are in [the Phase 6 source contract](docs/phase6_source_contract.md).
+
+With the API running and a current admin/staff login in Postman:
+
+1. Call `GET /api/v1/ingestion/sources` with Bearer authentication. Copy a visible source's `source_id`; answer citations also carry that ID.
+2. Call `POST /api/v1/tools/execute` with the same Bearer authentication and `Content-Type: application/json`. Replace the placeholder below with that sixty-four-character lowercase hexadecimal ID:
+
+```json
+{
+  "name": "get_source_status",
+  "arguments": {"source_id": "<copy the source_id here>"}
+}
+```
+
+A successful HTTP 200 response has `ok: true` and `data` containing the source's URL/title, visibility, active/index state, registry readiness, fetch/index/sync timestamps and an observation timestamp. The authority is `application_source_registry`; `company_facts_verified` stays false. The tool reports PostgreSQL metadata. It does not scan Qdrant, read document bodies, establish answerability, or verify current prices/stock. Null dates remain unknown. `retrieval_ready` reflects only the registered active/ready state.
+
+Staff may read public/staff metadata; admins may also read admin metadata, following existing source-list visibility rules. Unknown and hidden sources both return `ok: false` with error code `source_not_found`, without leaking source details. Invalid arguments, unknown tool names, database errors and query timeouts return structured safe tool failures (HTTP 200); malformed request envelopes use HTTP 422. Authentication errors use HTTP 401, oversized request bodies HTTP 413, unsupported content types HTTP 415, and slow body reads HTTP 408. Client-supplied role/permission fields are refused.
+
+Each request performs one lookup without model calls or retries. Body/argument/result limits are 8/4/8 KiB, the body read limit is thirty seconds, and PostgreSQL statement/lock limits are two/one seconds within the request transaction. These query limits do not establish a new end-to-end network timeout. Tool logs include allowlisted name, outcome and duration only. No arbitrary SQL, shell or model-supplied function name is executed.
+
+Run the focused checks:
+
+```bash
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_tools.py backend/tests/test_ingestion_api.py backend/tests/test_chat.py
+```
+
+The full backend suite passed 339 tests with two opt-in integration tests skipped; the focused run passed 71 tests. A real local PostgreSQL/API smoke check verified both roles, timestamp preservation, session revocation, query limits/reset and unchanged source/job records; temporary test accounts were removed. ERP product IDs, ownership, price/stock semantics, permissions and freshness rules still need confirmation before implementing those business tools.

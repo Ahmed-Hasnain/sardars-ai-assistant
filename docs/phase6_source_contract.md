@@ -1,12 +1,22 @@
 # Phase 6 — source discovery and read-only access
 
-Started: 2026-10-15 at the developer's request. Phase 5 full-crawl ingestion continues separately and remains incomplete.
+Started: 2026-10-15 at the developer's request. Phase 5 ingestion/replay has completed; its full-corpus retrieval/answer regressions remain unresolved (expanded 28/40, seed 4/7).
 
 ## Confirmed state
 
 Sardars has an ERP and a website. The developer currently has no ERP access and will ask the company for it. ERP identity, supported interfaces and ERP-to-website synchronization are unknown. The existing website crawl supplies dated descriptive evidence; it does not establish current prices or inventory. The application's PostgreSQL tables currently hold authentication, permissions, sources and ingestion jobs, not an authoritative company catalogue.
 
-The current `ChatModel.chat()` interface returns text only. A tool registry, model tool requests, execution loop and ERP read tools have not been implemented. Source discovery has started; no integration acceptance criterion is complete.
+The current `ChatModel.chat()` interface returns text only. The first application tool checkpoint now implements an explicit read-tool registry and authenticated single execution for `get_source_status`, backed by existing PostgreSQL source records. Model tool requests, an execution loop and ERP read tools are not implemented. ERP source discovery remains open.
+
+## Verified first checkpoint: source-status read tool
+
+`POST /api/v1/tools/execute` accepts one explicit tool name and strict arguments. `get_source_status` takes a sixty-four-character lowercase hexadecimal `source_id`; source IDs are available from the authenticated existing `/api/v1/ingestion/sources` listing or answer citations. Staff can see public/staff metadata; admins can also see admin metadata. The same visibility policy applies to source status, including nonready records; this endpoint returns no document body or uploaded file. Hidden and nonexistent sources both return `source_not_found`.
+
+The result reports source URL/title, visibility, active/index state, registry readiness, original fetch/index/sync times and the observation time. Its authority is `application_source_registry`, with `company_facts_verified: false`. Registry readiness reports metadata; this tool does not scan Qdrant, prove answerability or certify source truth/freshness. Missing dates remain null. Observing a registry row does not refresh its content timestamp. Titles/URLs are source data and must remain untrusted if a later model consumes this result.
+
+The API authenticates before reading a bounded body (8 KiB, thirty-second read limit). Arguments have a 4 KiB limit and results an 8 KiB limit. Each request executes at most one allowlisted lookup, without retries or a model. PostgreSQL queries have transaction-local two-second statement and one-second lock limits, reset on session close/rollback. Authentication uses the existing database connection behavior; there is no newly claimed end-to-end network deadline. Execution logs contain the registered tool name, outcome and latency, excluding arguments, source content, credentials and raw errors. Lookup/validation/timeout errors use safe structured results.
+
+Verification: the full backend suite passed 339 tests with two opt-in integration tests skipped; the focused tools/ingestion API/chat run passed 71 tests. The suite retains the existing Starlette/httpx deprecation warning. A real local PostgreSQL/API smoke check verified staff/admin success, preserved fetch timestamps, rejected invalid arguments/unknown tools, HTTP 401 before authentication and after session revocation, actual transaction-local limits and reset, and unchanged source/ingestion-job records. Temporary smoke accounts were removed. This verifies direct invocation only; it does not prove LLM tool calling or ERP integration.
 
 ## Information to request from Sardars
 
@@ -18,11 +28,11 @@ The current `ChatModel.chat()` interface returns text only. A tool registry, mod
 
 These are discovery questions, not assumptions about the ERP schema. Authority may differ by field. Choose the first lookup after inspecting the actual source and its owner's rules.
 
-## Small runnable checkpoints after source discovery
+## Next small runnable checkpoints
 
 1. Inspect the documented schema/sample and agree the minimum source identity, permissions, ID mapping and freshness rules for one lookup. A supported read-only API or database view can provide fresher data; a dated export is simpler to start with but needs explicit age limits.
 2. Implement one exact read-only service/repository lookup, strict Pydantic input/output schemas, bounded calls and structured safe errors. Verify it directly before model integration. A price/stock tool must reject missing or stale evidence under the agreed policy.
-3. Register that concrete tool explicitly and extend the model interface/Ollama adapter for tool requests. Application code validates names and arguments and enforces authorization. Bound execution time and tool iterations (maximum five); do not execute arbitrary model-supplied SQL/code/functions. Test permission denial, invalid/unknown requests, missing/stale data and timeouts.
+3. Extend the first verified read-tool boundary to the concrete ERP tool and extend the model interface/Ollama adapter for tool requests. Application code validates names and arguments and enforces authorization. Bound execution time and tool iterations (maximum five); do not execute arbitrary model-supplied SQL/code/functions. Test permission denial, invalid/unknown requests, missing/stale data and timeouts. Model tool-request behavior can first be checked with the existing source-status tool while ERP access is pending.
 4. Verify an authorized exact-fact question end to end, including actual local-model tool behavior, and record the result and limitations. Phase 7 later combines structured filtering with descriptive RAG.
 
-No company connector, product tables, tool registry or model tool calling is added merely to fill folders before the source is known. Synthetic unit tests later verify failure behavior; they cannot prove real ERP integration or current company facts. Avoid concurrent heavy model tests while the serial website embedding import is running.
+No ERP connector or company product tables have been created from assumptions. Synthetic tests verify failure behavior; they cannot prove real ERP integration or current company facts. The first registry is exercised by a working exact metadata read, rather than unused infrastructure.

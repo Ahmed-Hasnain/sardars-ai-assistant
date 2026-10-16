@@ -1,6 +1,10 @@
 # Phase 5 Step 6 — full saved-crawl coverage
 
-Checkpoint date: 2026-10-15. **Full-site ingestion remains in progress.** The earlier Step 5 completion described the limited descriptive pipeline and eight-document benchmark, not all 1,008 website records. Price/stock tools and current business promises remain deferred.
+Completion follow-up, 2026-10-15: **full-site ingestion and repeat verification finished** for all 999 eligible website sources/3,739 chunks across 309 batches. Nine whole-source exclusions account for the remaining saved records. Replay verified/skipped all 999 sources. A later PostgreSQL smoke check found all 999 public registrations active/ready. The expanded evaluation passed **28/40**, with **15/24** supported-source hits; the original seed regression passed **4/7**. This leaves retrieval/evidence/evaluation follow-up open and does not declare full answer quality complete. See [the observed completion outcomes](phase5_full_site_completion_status.md) and local `data/extracted/full_site_completion_evaluation.json` / `full_site_continuation.log`.
+
+The twelve expanded failures include one service/input failure and expected-source/usable-evidence misses. The brand-list seed answer cited a different authorized article and failed its strict expected-source assertion; the Bongio definition abstained, and storage returned another article without the expected Shower Niche evidence. Distinguish alternate valid citations, evidence quality and service failures before changing retrieval architecture. The eight isolated trust controls passed. Phase 6's direct source-status tool is independent of these unresolved answer regressions.
+
+The remainder records the **historical partial checkpoint** from 2026-10-15, before completion. Its 39-source counts and 37/40 score are not the final full-corpus outcomes. The earlier Step 5 completion described the limited descriptive pipeline and eight-document benchmark. Price/stock tools and current business promises remain pending authoritative ERP access and rules.
 
 ## Prepared scope and live coverage
 
