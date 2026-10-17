@@ -108,6 +108,51 @@ def test_natural_broad_product_browsing_uses_bounded_visible_catalog(catalog):
         assert not invoke(db, "Show products under 50").data.matches
 
 
+def test_catalog_categories_need_no_routing_word_list_and_keep_visibility(catalog):
+    common = dict(source_file_name="test.csv", source_file_sha256="a" * 64,
+                  source_row_kind="variant")
+    with catalog.begin() as db:
+        db.add_all([
+            Product(**common, source_row_number=20, handle="walnut-ceiling-fan",
+                    title="Walnut Ceiling Fan", meta_custom_category="Fans",
+                    vendor="Punkh", status="active", visibility="staff", variant_sku="FAN-1", variant_price=100),
+            Product(**common, source_row_number=21, handle="hidden-ceiling-fan",
+                    title="Hidden Ceiling Fan", meta_custom_category="Fans",
+                    status="active", visibility="admin", variant_sku="FAN-2", variant_price=100),
+            Product(**common, source_row_number=22, handle="old-ceiling-fan",
+                    title="Old Ceiling Fan", meta_custom_category="Fans",
+                    status="archived", visibility="staff", variant_sku="FAN-3", variant_price=100),
+            Product(**common, source_row_number=23, handle="kitchen-paper-holder",
+                    title="Paper Towel Holder", meta_custom_category="Kitchen Accessories",
+                    status="active", visibility="staff", variant_sku="KITCHEN-1", variant_price=200),
+            Product(**common, source_row_number=24, handle="modern-wall-light",
+                    title="Modern Wall Light", meta_custom_category="Outdoor Lighting",
+                    status="active", visibility="staff", variant_sku="LIGHT-1", variant_price=300),
+            Product(**common, source_row_number=25, handle="floor-drain",
+                    title="Floor Drain", meta_custom_category="Drains",
+                    status="active", visibility="staff", variant_sku="DRAIN-1", variant_price=100),
+            Product(**common, source_row_number=26, handle="tap-with-drain",
+                    title="Tap With Drain", meta_custom_category="Sanitary Fittings",
+                    status="active", visibility="staff", variant_sku="TAP-1", variant_price=100),
+        ])
+    with catalog() as db:
+        for question in (
+            "Do you have fans?",
+            "please check database and find some fans from products",
+            "tell me now , do you sell fans ?",
+            "what kind of fans fo sardars sell",
+        ):
+            assert [item.handle for item in invoke(db, question).data.matches] == ["walnut-ceiling-fan"]
+        assert [item.handle for item in invoke(db, "Recommend Punkh fans").data.matches] == [
+            "walnut-ceiling-fan"]
+        assert invoke(db, "Recommend Grohe fans").data.matches == []
+        assert [item.handle for item in invoke(db, "Show me drains").data.matches] == ["floor-drain"]
+        assert [item.handle for item in invoke(db, "Show me kitchen accessories").data.matches] == [
+            "kitchen-paper-holder"]
+        assert [item.handle for item in invoke(db, "Find outdoor lighting").data.matches] == [
+            "modern-wall-light"]
+
+
 def test_currency_unknown_and_context_is_reauthorized(catalog):
     with catalog() as db:
         currency = invoke(db, "Recommend basin mixers under PKR 100,000")

@@ -1,6 +1,6 @@
 # Sardars AI Assistant
 
-A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. The current implementation has a FastAPI backend, PostgreSQL, Alembic migrations, revocable internal login, health checks, local-model chat through Ollama, and an approved-source Qdrant answer prototype.
+A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. This monorepo contains the FastAPI backend and a React/Vite/TypeScript frontend. The backend provides PostgreSQL-backed conversations, revocable internal login, local-model chat through Ollama, and authorized Qdrant retrieval.
 
 ## Local setup
 
@@ -28,13 +28,33 @@ Start the API in another terminal:
 
 Check http://127.0.0.1:8000/api/v1/health for API liveness and http://127.0.0.1:8000/api/v1/ready for database readiness.
 
+Run the frontend in a second terminal (Node.js 20.19+ or 22.12+):
+
+    cd frontend
+    npm ci
+    npm run dev
+
+Open http://127.0.0.1:5173 and sign in with an existing admin or staff account. Vite proxies `/api` to the local FastAPI server on port 8000; the browser does not need a separate CORS allowance. The frontend supports sign-in, new and follow-up chats, returned citations, retry after an API error, and a sidebar of owned conversations. The list shows a short preview of each conversation's first question. Open one to read its latest 50 messages and load older pages; earlier answers are marked as historical because business facts may have changed. Historical pages do not yet include clickable citation metadata.
+
+The browser keeps the bearer token and active conversation ID in this tab's `sessionStorage` so refresh can restore the chat. On startup, the frontend checks the token with `/auth/me` before showing any saved conversation; logout or HTTP 401 clears it. Closing the tab ends this browser-side session, and the backend still enforces its eight-hour token expiry and role/source visibility. Browser storage is accessible to JavaScript, so a later production authentication design should use an HTTP-only cookie and its CSRF controls. Markdown rendering, streaming, and production static hosting remain Phase 10 work. For a production static deployment, serve `frontend/dist/` and reverse-proxy `/api` to FastAPI on the same origin.
+
+Frontend checks:
+
+    cd frontend
+    npm test
+    npm run build
+
 Run the smoke tests while PostgreSQL is running:
 
     PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests
 
 Stop PostgreSQL with `docker compose stop db`; its data is retained. Keep `.env` and `backend/.venv/` out of Git.
 
-For daily development, run `./scripts/dev.sh` from the project root. It starts PostgreSQL and Qdrant through Docker Compose, applies pending database migrations, starts the installed Ollama system service if needed, runs FastAPI, and follows all four services' logs in one terminal. If Ollama is stopped, `sudo` may ask for your password. Press Ctrl+C to stop FastAPI and the log followers; the Docker containers and Ollama service remain running. Stop the containers later with `docker compose stop db qdrant`.
+For daily development, run one command from the project root:
+
+    ./scripts/dev.sh
+
+It starts PostgreSQL and Qdrant through Docker Compose, applies pending database migrations, starts the installed Ollama system service if needed, and runs FastAPI and the Vite frontend together. Open http://127.0.0.1:5173/ for the assistant or http://127.0.0.1:8000/docs for the API. If the frontend dependencies are missing, the script installs the locked packages with `npm ci`; the Python environment and first admin account still require the initial setup above. If Ollama is stopped, `sudo` may ask for your password. Press Ctrl+C to stop both app servers and the log followers; the Docker containers and Ollama service remain running. Stop the containers later with `docker compose stop db qdrant`.
 
 ## Internal login and roles
 

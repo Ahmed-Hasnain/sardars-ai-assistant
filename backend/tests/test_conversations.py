@@ -89,6 +89,7 @@ def test_chat_persists_and_reviews_bounded_general_followup(runtime) -> None:
     assert messages[-2]["content"] == "A mixer combines water."
     listed = client.get("/api/v1/conversations", headers=headers()).json()
     assert [item["id"] for item in listed] == [identity]
+    assert listed[0]["preview"] == "What is a mixer?"
     page = client.get(f"/api/v1/conversations/{identity}", headers=headers()).json()
     assert [item["role"] for item in page["messages"]] == ["user", "assistant", "user", "assistant"]
     assert page["messages"][1]["model"] == "local"

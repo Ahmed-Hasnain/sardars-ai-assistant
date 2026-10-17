@@ -10,6 +10,7 @@ class ConversationSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
+    preview: str | None = None
 
 
 class MessageView(BaseModel):

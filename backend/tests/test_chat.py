@@ -140,6 +140,14 @@ def test_chat_routes_combined_product_request_and_passes_followup_handles() -> N
     "ok tell me what products i can get under 10000",
     "ok tell me what products i can get",
     "Show me basin mixers",
+    "Show me fans",
+    "Do you have fans?",
+    "What fans does Sardars offer?",
+    "please check database and find some fans from products",
+    "tell me now , do you sell fans ?",
+    "what kind of fans fo sardars sell",
+    "Show me kitchen accessories",
+    "Find outdoor lighting",
 ])
 def test_natural_browsing_questions_use_catalog_tool_flow(message) -> None:
     with (
@@ -152,6 +160,23 @@ def test_natural_browsing_questions_use_catalog_tool_flow(message) -> None:
     assert response.json()["route"] == "product_search"
     discovery.assert_awaited_once()
     company.assert_not_called()
+
+
+def test_broad_discovery_wording_does_not_hide_company_policy_answer() -> None:
+    with (
+        patch("app.api.chat.answer_product_discovery", new_callable=AsyncMock) as discovery,
+        patch("app.api.chat.answer_company", new_callable=AsyncMock) as company,
+    ):
+        discovery.return_value = ChatResponse(answer="No catalog matches", route="product_search", model=None)
+        company.return_value = CitedAnswer("The policy is documented. [1]", [
+            CitedSource(1, "a" * 64, "Returns", "https://sardarandco.com/pages/returns", None),
+        ])
+        response = client.post("/api/v1/chat", json={"message": "Show me your return policy"})
+    assert response.status_code == 200
+    assert response.json()["route"] == "company"
+    assert response.json()["sources"][0]["title"] == "Returns"
+    discovery.assert_awaited_once()
+    company.assert_awaited_once()
 
 
 @pytest.mark.parametrize("message,expected", [

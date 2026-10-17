@@ -42,11 +42,15 @@ DISCOVERY_INTENT = re.compile(
     r"\b(?:recommend|suggest|compare|comparison|difference|cheaper|under|below|"
     r"over|above|less than|more than|which is better|which one)\b|"
     r"\b(?:what|which)\b.{0,80}\bproducts\b|"
-    r"\b(?:show|list|browse|find)\b.{0,80}\b(?:products?|basin|mixer|faucet|"
-    r"tap|toilet|shower|sink|bath|vanity|tile|flush|plate)\b",
+    r"\b(?:show|list|browse|find|search)\b|"
+    r"\b(?:do|does|can|what|which|are|is)\b.{0,80}\b(?:have|sell|offer|carry|stock|available)\b|"
+    r"\b(?:looking for|interested in)\b",
     re.I,
 )
-PRODUCT_DOMAIN = re.compile(r"\b(?:products?|catalogue|catalog|sku|basin|mixer|faucet|tap|toilet|shower|sink|bath|vanity|tile|flush|plate)\b", re.I)
+COMPANY_INFO = re.compile(
+    r"\b(?:policy|return|refund|delivery|shipping|warranty|showroom|address|"
+    r"opening hours|contact|history|mission|founder|ceo|brands?)\b", re.I,
+)
 
 
 @router.post("/chat", response_model=ChatResponse, openapi_extra=QUESTION_REQUEST_OPENAPI)
@@ -89,22 +93,23 @@ async def _answer_chat(
     scope = scope_question(request.message, has_product_context=bool(request.product_handles))
     if scope in {"unrelated", "health", "unsupported_action", "unsafe"}:
         replies = {
-            "unrelated": "I can help with Sardars and general bathroom product questions.",
+            "unrelated": "I can help with Sardars and general product questions.",
             "health": "I can't provide medical or fertility advice. Please ask a qualified healthcare professional.",
             "unsupported_action": "I can't carry out orders, messages, bookings, or product changes in this assistant.",
             "unsafe": "I can't disclose private information or change my access rules.",
         }
         return ChatResponse(answer=replies[scope], route="out_of_scope", model=None)
-    if scope == "company" and (
-        request.product_handles or
-        (DISCOVERY_INTENT.search(request.message) and PRODUCT_DOMAIN.search(request.message))
-    ):
+    if scope == "company" and (request.product_handles or DISCOVERY_INTENT.search(request.message)):
         try:
-            return await asyncio.wait_for(
+            discovery = await asyncio.wait_for(
                 answer_product_discovery(request.message, user, db, request.product_handles), timeout=35,
             )
         except asyncio.TimeoutError:
             return ChatResponse(answer="Product search timed out.", route="product_search", model=None)
+        # Broad wording can also ask for company information. A catalog miss
+        # must not hide an otherwise answerable policy or company question.
+        if discovery.products or request.product_handles or not COMPANY_INFO.search(request.message):
+            return discovery
     if scope == "company" and PRODUCT_INTENT.search(request.message):
         try:
             return await asyncio.wait_for(answer_product(request.message, user, db), timeout=10)

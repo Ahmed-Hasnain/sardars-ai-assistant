@@ -181,13 +181,18 @@ def list_owned(db: Session, user: User, limit: int, offset: int) -> list[Convers
     _bound_sql(db)
     now = datetime.now(timezone.utc)
     allowed_roles = ["staff", "admin"] if user.role == "admin" else ["staff"]
-    rows = db.scalars(select(Conversation).where(
+    first_question = select(func.substr(ConversationMessage.content, 1, 100)).where(
+        ConversationMessage.conversation_id == Conversation.id,
+        ConversationMessage.role == "user",
+    ).order_by(ConversationMessage.id).limit(1).correlate(Conversation).scalar_subquery()
+    rows = db.execute(select(Conversation, first_question).where(
         Conversation.user_id == user.id, Conversation.expires_at > now,
         Conversation.required_role.in_(allowed_roles),
     ).order_by(Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit)).all()
     return [ConversationSummary(
         id=row.id, created_at=row.created_at, updated_at=row.updated_at, expires_at=row.expires_at,
-    ) for row in rows]
+        preview=preview.strip() if preview else None,
+    ) for row, preview in rows]
 
 
 def _visible_history_ids(db: Session, user: User, messages: list[ConversationMessage]) -> tuple[set[str], set[str]]:
