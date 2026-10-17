@@ -91,4 +91,5 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
         currency=data.currency,
     )
     return ChatResponse(answer=_render_product(data), route="product", model=None,
-                        company_data_verified=True, product_source=source)
+                        company_data_verified=True, product_source=source,
+                        product_handles=[data.handle])

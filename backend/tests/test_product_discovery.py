@@ -94,6 +94,20 @@ def test_filter_requires_same_variant_finish_and_price_with_role_and_status(cata
         assert invoke(db, "Recommend shower mixers under 1000").data.matches[0].handle == "black-shower-mixer"
 
 
+def test_natural_broad_product_browsing_uses_bounded_visible_catalog(catalog):
+    with catalog() as db:
+        priced = invoke(db, "ok tell me what products i can get under 10000")
+        assert priced.ok
+        assert 1 <= len(priced.data.matches) <= 3
+        assert all(float(item.price) < 10000 for item in priced.data.matches)
+        assert all(item.handle not in {"admin-basin-mixer", "archived-basin-mixer"}
+                   for item in priced.data.matches)
+        broad = invoke(db, "ok tell me what products i can get")
+        assert broad.ok and broad.data.matches
+        assert not invoke(db, "Hello").data.matches
+        assert not invoke(db, "Show products under 50").data.matches
+
+
 def test_currency_unknown_and_context_is_reauthorized(catalog):
     with catalog() as db:
         currency = invoke(db, "Recommend basin mixers under PKR 100,000")

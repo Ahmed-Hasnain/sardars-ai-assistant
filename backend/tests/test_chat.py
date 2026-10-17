@@ -136,6 +136,24 @@ def test_chat_routes_combined_product_request_and_passes_followup_handles() -> N
     assert invalid.status_code == 422
 
 
+@pytest.mark.parametrize("message", [
+    "ok tell me what products i can get under 10000",
+    "ok tell me what products i can get",
+    "Show me basin mixers",
+])
+def test_natural_browsing_questions_use_catalog_tool_flow(message) -> None:
+    with (
+        patch("app.api.chat.answer_product_discovery", new_callable=AsyncMock) as discovery,
+        patch("app.api.chat.answer_company", new_callable=AsyncMock) as company,
+    ):
+        discovery.return_value = ChatResponse(answer="catalog sample", route="product_search", model=None)
+        response = client.post("/api/v1/chat", json={"message": message})
+    assert response.status_code == 200
+    assert response.json()["route"] == "product_search"
+    discovery.assert_awaited_once()
+    company.assert_not_called()
+
+
 @pytest.mark.parametrize("message,expected", [
     ("Tell me a joke", "I can help with Sardars"),
     ("Place an order for a basin mixer", "I can't carry out"),

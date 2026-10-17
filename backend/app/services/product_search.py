@@ -32,7 +32,9 @@ STOP = frozenset({
     "their", "these", "this", "to", "under", "which", "with", "you", "your", "what", "would",
     "be", "best", "better", "one", "ones", "them", "those", "details", "tell", "give", "list",
     "pkr", "rs", "usd", "between", "below", "above", "least", "most", "up", "less", "over",
+    "ok", "okay", "get", "find", "browse", "see", "could", "want", "need",
 })
+BROAD_BROWSE = re.compile(r"\b(?:products|catalog|catalogue|items)\b", re.I)
 FINISH_TERMS = frozenset({"black", "white", "chrome", "gold", "silver", "gunmetal", "bronze", "copper"})
 PRODUCT_TYPE_TERMS = frozenset({"basin", "mixer", "shower", "bath", "toilet", "sink", "faucet", "tap", "tile", "vanity"})
 
@@ -186,7 +188,8 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
             term_question = re.sub(re.escape(identifier), " ", term_question, flags=re.I)
         terms = _terms(term_question)
         finishes = [term for term in terms if term in FINISH_TERMS]
-        if not handles and not terms:
+        if (not handles and not terms and minimum is None and maximum is None
+            and not BROAD_BROWSE.search(args.question)):
             return empty(currency_unverified=bool(currency))
 
         base = select(Product.handle).where(

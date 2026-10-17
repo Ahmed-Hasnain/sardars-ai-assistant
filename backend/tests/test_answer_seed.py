@@ -56,6 +56,24 @@ def test_later_authorized_candidate_can_supply_brand_evidence():
     assert "Bongio" in result.text and result.sources
 
 
+def test_company_brand_definition_survives_product_result_crowding() -> None:
+    products = []
+    for index in range(6):
+        point = _point()
+        url = f"https://sardarandco.com/products/bongio-mixer-{index}"
+        point["payload"].update(
+            url=url, source_id=sha256(url.encode()).hexdigest(),
+            source_type="products", title=f"Bongio Mixer {index}",
+            text="Bongio mixer has a ceramic cartridge for controlled water flow.",
+        )
+        products.append(point)
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points("What is Bongio?", products + [_point()], model))
+    assert result.text == "Sardars lists Bongio as a brand. [1]"
+    assert result.sources[0].url == ABOUT_URL
+    model.chat.assert_not_called()
+
+
 def test_product_material_description_precedes_title_heavy_vendor_prose():
     point = _point()
     point["payload"].update(url="https://sardarandco.com/products/over-counter-wash-basin-round", source_type="products",
@@ -286,6 +304,91 @@ def test_brand_definition_does_not_guess_for_unrelated_name() -> None:
 
     assert result.text == FALLBACK
     assert result.sources == []
+    model.chat.assert_not_called()
+
+
+def test_natural_brand_questions_use_authorized_list_sentence() -> None:
+    first = _point()
+    first["payload"]["text"] = (
+        "Our team specializes in providing luxury sanitary products to customers. "
+        "We source products from leading brands including Bongio, Scarabeo and Grohe."
+    )
+    second = _point()
+    second["payload"]["text"] = (
+        "With premium brands like Bongio, Scarabeo, Oli, Jacuzzi, and Grohe, "
+        "every customer can find something here."
+    )
+    model = AsyncMock()
+    for question in (
+        "i mean what brands are they offering ?",
+        "Can you tellme what brands does sardars offer?",
+        "Which brands does Sardars carry?",
+    ):
+        result = asyncio.run(answer_from_points(question, [first, second], model))
+        assert "Bongio, Scarabeo, Oli, Jacuzzi, and Grohe" in result.text
+        assert "luxury sanitary products" not in result.text
+        assert result.sources == [CitedSource(
+            1, sha256(ABOUT_URL.encode()).hexdigest(), "About Us", ABOUT_URL, FETCHED_AT,
+        )]
+    model.chat.assert_not_called()
+
+
+def test_two_part_company_and_brand_question_answers_both_from_source() -> None:
+    point = _point()
+    point["payload"]["text"] = (
+        "Our team specializes in providing luxury sanitary products to customers. "
+        "With premium brands like Bongio, Scarabeo, Oli, Jacuzzi, and Grohe, "
+        "every customer can find something here."
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points(
+        "what is sardars and what brands are they offering?", [point], model,
+    ))
+    assert "luxury sanitary products" in result.text
+    assert "Bongio, Scarabeo, Oli, Jacuzzi, and Grohe" in result.text
+    assert result.text.count("[1]") == 2
+    assert len(result.sources) == 1
+    model.chat.assert_not_called()
+
+
+def test_natural_company_intro_uses_about_source_without_model_guess() -> None:
+    point = _point()
+    point["payload"]["text"] = (
+        "Sardars is driven by commitment to quality. "
+        "Our team specializes in providing luxury sanitary products to customers."
+    )
+    model = AsyncMock()
+    for question in ("What is Sardars?", "Who are Sardars?", "Tell me about Sardars"):
+        result = asyncio.run(answer_from_points(question, [point], model))
+        assert result.text == "Our team specializes in providing luxury sanitary products to customers. [1]"
+        assert len(result.sources) == 1
+    model.chat.assert_not_called()
+
+
+def test_brand_paraphrase_does_not_use_unapproved_or_unrelated_evidence() -> None:
+    unapproved = _point()
+    unapproved["payload"]["review_status"] = "pending"
+    unrelated = _point()
+    unrelated["payload"].update(
+        title="Industry article", url="https://sardarandco.com/blogs/news/brands",
+        source_type="articles", text="Other shops offer brands like Example and Rival.",
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points(
+        "What brands does Sardars offer?", [unapproved, unrelated], model,
+    ))
+    assert result.text == FALLBACK and result.sources == []
+    model.chat.assert_not_called()
+
+
+def test_brand_list_does_not_answer_warranty_question() -> None:
+    model = AsyncMock()
+    for question in (
+        "Which brands have a lifetime warranty?",
+        "Which brands sell shower mixers?",
+    ):
+        result = asyncio.run(answer_from_points(question, [_point()], model))
+        assert result.text == FALLBACK and result.sources == []
     model.chat.assert_not_called()
 
 

@@ -32,6 +32,8 @@ async def ask(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> AskResponse:
+    if request.conversation_id is not None:
+        raise HTTPException(status_code=422, detail="Conversation follow-ups use /api/v1/chat")
     if scope_question(request.message) in {"unsafe", "unsupported_action", "unrelated", "health"}:
         return AskResponse(answer=FALLBACK, sources=[])
     try:

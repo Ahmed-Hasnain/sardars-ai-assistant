@@ -272,13 +272,15 @@ The final backend suite passed **510 tests**, with three opt-in live tests skipp
 
 Goal: persist conversations and support follow-up questions with bounded context.
 
-- [ ] Add users/roles as needed, conversations, messages, ownership checks, and migrations.
-- [ ] Save messages, model metadata, timing/token counts when available, and only necessary tool/source references.
-- [ ] Send a bounded recent history; preserve product references needed for follow-ups.
-- [ ] Add conversation summaries only if actual usage requires them; never confuse a summary with company evidence.
-- [ ] Define retention and deletion behavior for staff conversation data.
+- [x] Reuse existing users/roles; add conversations, messages, ownership checks, and a migration.
+- [x] Save completed turns, model metadata, timing/token counts when available, and only necessary source IDs/product handles.
+- [x] Send bounded recent context for recognizable follow-ups; preserve product handles and reread current values through authorized tools.
+- [x] Defer conversation summaries until measured usage requires them; never treat conversation history as company evidence.
+- [x] Define a configurable 30-day rolling expiry, immediate owner deletion, and a bounded physical-purge command for staff conversation data.
 
 Exit: users can continue and review their own conversations, and follow-ups resolve correctly without unbounded prompts.
+
+Phase 9 completed for the internal prototype on 2026-10-17. An authenticated `/chat` turn creates or continues an owned PostgreSQL conversation; list, paged review and delete endpoints enforce ownership and current role. Recognizable general follow-ups use at most eight recent messages and 1,600 history characters; company follow-ups can expand the search query without treating prior chat as evidence, and product follow-ups reuse handles only for fresh authorized PostgreSQL searches. Independent topics drop old prompt context. Source and product visibility are rechecked when reviewing historical answers, and failed or timed-out turns are not saved. The additive migration applied to local PostgreSQL and `alembic check` found no drift; an authenticated PostgreSQL API smoke check passed. The final backend suite passed **537 tests**, with three opt-in live tests skipped and one existing dependency warning. No summary was added because there is no measured need; the keyword-based follow-up boundary and 30-day physical purge scheduling remain prototype limitations. See `IMPLEMENTATION_STATUS.md` and README.
 
 ## Phase 10 — Frontend and streaming
 

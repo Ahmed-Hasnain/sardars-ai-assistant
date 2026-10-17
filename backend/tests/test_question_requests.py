@@ -271,7 +271,9 @@ def test_chat_and_ask_share_user_rate_limit_before_body_read(runtime, monkeypatc
 @pytest.mark.parametrize("endpoint", ENDPOINTS)
 def test_openapi_keeps_strict_question_schema_and_bearer_auth(endpoint):
     operation = app.openapi()["paths"][endpoint]["post"]
-    request = operation["requestBody"]["content"]["application/json"]["schema"]
+    media_type = operation["requestBody"]["content"]["application/json"]
+    request = media_type["schema"]
+    assert media_type["example"] == {"message": "What is a mixer?"}
     assert request["additionalProperties"] is False
     assert request["required"] == ["message"]
     assert request["properties"]["message"]["maxLength"] == 2000

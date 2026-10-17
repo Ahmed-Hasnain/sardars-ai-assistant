@@ -10,7 +10,14 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     message: str = Field(min_length=1, max_length=2000)
-    product_handles: list[str] = Field(default_factory=list, max_length=3)
+    product_handles: list[str] = Field(
+        default_factory=list, max_length=3,
+        description="Optional handles returned by an earlier product answer; omit for a new chat.",
+    )
+    conversation_id: str | None = Field(
+        description="Omit to start a new conversation. To continue one, use the conversation_id from an earlier chat response for this account.",
+        default=None, pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    )
 
     @field_validator("message")
     @classmethod
@@ -65,3 +72,4 @@ class ChatResponse(BaseModel):
     product_source: ProductSource | None = None
     products: list[MatchedProduct] = Field(default_factory=list)
     product_handles: list[str] = Field(default_factory=list)
+    conversation_id: str | None = None

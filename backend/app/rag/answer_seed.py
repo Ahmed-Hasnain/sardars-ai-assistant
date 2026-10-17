@@ -17,7 +17,7 @@ from app.rag.text_safety import contains_prompt_instruction as _contains_prompt_
 from app.rag.claim_safety import UNVERIFIED_BUSINESS_FACT, unsafe_descriptive_claim
 from app.llm.base import ChatMessage, ChatModel
 from app.llm.ollama import OllamaChatModel
-from app.retrieval.search_seed import is_company_overview_question, search_approved
+from app.retrieval.search_seed import is_company_identity_question, is_company_overview_question, search_approved
 from app.retrieval.authorization import authorized_points
 from app.retrieval.limits import CANDIDATE_LIMIT
 
@@ -54,8 +54,28 @@ QUESTION_FILLER = {
     "how", "in", "is", "it", "mention", "mentions", "mentioned", "of", "product",
     "products", "describe", "describes", "described", "sardar", "sardars", "the",
     "their", "they", "to", "us", "what", "which", "who",
-    "tell", "me", "say", "says", "have", "has",
+    "tell", "me", "say", "says", "have", "has", "can", "could", "would",
+    "you", "i", "ok", "okay", "please", "mean", "tellme",
 }
+BRAND_LIST_REQUEST = re.compile(r"\bbrands\b", re.I)
+BRAND_OFFER_REQUEST = re.compile(
+    r"\b(?:offer\w*|carr(?:y|ies)|sell\w*|provid\w*|have|get)\b|"
+    r"\bwhat\s+brands\s+does\s+sardars\b",
+    re.I,
+)
+BRAND_LIST_QUALIFIER = re.compile(
+    r"\b(?:warranty|guarantee|refund|return|delivery|shipping|cheapest|"
+    r"best|top|popular|stock|available|price|prices|under|above|below|"
+    r"basin|mixer|faucet|tap|toilet|shower|sink|bath|vanity|tile)\b",
+    re.I,
+)
+COMPANY_IDENTITY_REQUEST = re.compile(r"\b(?:what is|who are)\s+sardars\b", re.I)
+COMPANY_DESCRIPTION = re.compile(
+    r"\b(?:speciali[sz]\w*\s+in\s+provid\w*|"
+    r"sardars\s+(?:is|provides|supplies))\b",
+    re.I,
+)
+COMPANY_CATEGORY = re.compile(r"\b(?:sanitary|bathroom|fittings|tiles|products|store|retail)\b", re.I)
 
 SYSTEM_PROMPT = (
     "You answer questions about Sardars using only the numbered source excerpts "
@@ -239,6 +259,91 @@ def _direct_brand_answer(question: str, matches: list[Evidence]) -> CitedAnswer 
     return None
 
 
+def _company_brand_definition(question: str, excerpts: list[Evidence]) -> CitedAnswer | None:
+    """Inspect registered company-page brand evidence before the three-sentence cap."""
+    question_match = BRAND_QUESTION_PATTERN.fullmatch(question.strip())
+    if question_match is None:
+        return None
+    name = re.compile(rf"\b{re.escape(question_match.group(1))}\b", re.I)
+    for excerpt in excerpts:
+        if (source_type(excerpt.url) != "pages"
+            or not re.search(r"\b(?:about|brands?)\b", excerpt.title, re.I)):
+            continue
+        for raw in SENTENCE_PATTERN.split(excerpt.text):
+            sentence = raw.strip()
+            if (len(sentence) > MAX_SENTENCE_CHARS
+                or not name.search(sentence)
+                or not BRAND_MENTION_PATTERN.search(sentence)
+                or _contains_prompt_instruction(sentence)
+                or unsafe_descriptive_claim(sentence)):
+                continue
+            match = Evidence(
+                excerpt.source_id, excerpt.title, excerpt.url, excerpt.fetched_at,
+                sentence, excerpt.content_derivation, excerpt.original_content_sha256,
+            )
+            answer = _direct_brand_answer(question, [match])
+            if answer is not None:
+                return answer
+    return None
+
+
+def _brand_list_request(question: str) -> bool:
+    return bool(BRAND_LIST_REQUEST.search(question)
+                and BRAND_OFFER_REQUEST.search(question)
+                and not BRAND_LIST_QUALIFIER.search(question))
+
+
+def _company_description(excerpts: list[Evidence], source_id: str | None = None) -> Evidence | None:
+    for excerpt in excerpts:
+        if (source_type(excerpt.url) != "pages"
+            or not re.search(r"\babout\b", excerpt.title, re.I)
+            or (source_id is not None and excerpt.source_id != source_id)):
+            continue
+        for raw in SENTENCE_PATTERN.split(excerpt.text):
+            sentence = raw.strip()
+            if (len(sentence) <= MAX_SENTENCE_CHARS
+                and COMPANY_DESCRIPTION.search(sentence)
+                and COMPANY_CATEGORY.search(sentence)
+                and not _contains_prompt_instruction(sentence)
+                and not unsafe_descriptive_claim(sentence)):
+                return Evidence(
+                    excerpt.source_id, excerpt.title, excerpt.url, excerpt.fetched_at,
+                    sentence, excerpt.content_derivation, excerpt.original_content_sha256,
+                )
+    return None
+
+
+def _brand_list_answer(question: str, excerpts: list[Evidence]) -> CitedAnswer | None:
+    """Prefer an explicit company brand list over matching every question word."""
+    if not _brand_list_request(question):
+        return None
+    candidates: list[tuple[Evidence, str, int]] = []
+    for excerpt in excerpts:
+        # A product page or article may mention a competitor without saying
+        # Sardars carries it. Prefer the company's own overview/brand pages.
+        if (source_type(excerpt.url) != "pages"
+            or not re.search(r"\b(?:about|brands?)\b", excerpt.title, re.I)):
+            continue
+        for raw in SENTENCE_PATTERN.split(excerpt.text):
+            sentence = raw.strip()
+            if (len(sentence) > MAX_SENTENCE_CHARS
+                or not BRAND_LIST_PATTERN.search(sentence)
+                or _contains_prompt_instruction(sentence)
+                or unsafe_descriptive_claim(sentence)):
+                continue
+            candidates.append((excerpt, sentence, sentence.count(",") + len(re.findall(r"\band\b", sentence, re.I))))
+    if not candidates:
+        return None
+    source, sentence, _ = max(candidates, key=lambda item: item[2])
+    sentences = []
+    if COMPANY_IDENTITY_REQUEST.search(question):
+        description = _company_description(excerpts, source.source_id)
+        if description is not None and description.text != sentence:
+            sentences.append(description.text)
+    sentences.append(sentence)
+    return CitedAnswer(" ".join(f"{item} [1]" for item in sentences), [source.cited_source(1)])
+
+
 def _judge_sentences(excerpts: list[Evidence]) -> list[Evidence]:
     """Offer safe, short company-page sentences without a word-match gate."""
     selected: list[Evidence] = []
@@ -314,6 +419,19 @@ async def answer_from_points(
         return CitedAnswer(FALLBACK, [])
 
     excerpts = _approved_excerpts(points)
+    brand_answer = _brand_list_answer(question, excerpts)
+    if brand_answer is not None:
+        return brand_answer
+    if _brand_list_request(question):
+        return CitedAnswer(FALLBACK, [])
+    if is_company_identity_question(question):
+        description = _company_description(excerpts)
+        if description is None:
+            return CitedAnswer(FALLBACK, [])
+        return CitedAnswer(f"{description.text} [1]", [description.cited_source(1)])
+    brand_definition = _company_brand_definition(question, excerpts)
+    if brand_definition is not None:
+        return brand_definition
     matches = _matching_sentences(question, excerpts)
     if not matches:
         # Broader company-overview phrasing can be paraphrased. Keep narrow
