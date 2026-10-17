@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:0.6b"
     ollama_timeout_seconds: float = 120.0
     ollama_keep_alive: int = 0
+    answer_timeout_seconds: float = Field(default=90.0, ge=5, le=180)
 
     qdrant_base_url: str = "http://127.0.0.1:6333"
     brand_definition_profile_url: str | None = "https://sardarandco.com/pages/about-us"

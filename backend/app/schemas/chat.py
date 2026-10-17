@@ -1,12 +1,14 @@
 import re
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.ask import SourceCitation
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     message: str = Field(min_length=1, max_length=2000)
     product_handles: list[str] = Field(default_factory=list, max_length=3)
 
@@ -53,7 +55,7 @@ class MatchedProduct(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    route: Literal["general", "company", "product", "product_search"]
+    route: Literal["general", "company", "product", "product_search", "out_of_scope"]
     sources: list[SourceCitation] = Field(default_factory=list)
     model: str | None
     company_data_verified: bool = False

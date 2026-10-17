@@ -248,13 +248,25 @@ Phase 7 complete for this internal proof of concept (2026-10-17). The developer 
 
 Goal: expand and test protections already present in earlier phases.
 
-- [ ] Refine scope handling for Sardars, related product knowledge, unrelated requests, and unsafe requests without rejecting useful domain questions.
-- [ ] Test prompt injection in pages, PDFs, tool output, and user input; authorization and permissions must still be code-enforced.
-- [ ] Validate high-impact output claims (identity, price, stock, dimensions, warranty, delivery, links) against retrieved/tool evidence where deterministic checks are possible.
-- [ ] Check private-data disclosure, role boundaries, rate limits, request sizes, timeouts, and error-message hygiene.
-- [ ] Avoid unnecessary second-model validation calls; add one only if measured benefit justifies it.
+- [x] Refine scope handling for Sardars, related product knowledge, unrelated requests, and unsafe requests without rejecting useful domain questions.
+- [x] Test prompt injection in pages, PDFs, tool output, and user input; authorization and permissions must still be code-enforced.
+- [x] Validate high-impact output claims (identity, price, stock, dimensions, warranty, delivery, links) against retrieved/tool evidence where deterministic checks are possible.
+- [x] Check private-data disclosure, role boundaries, rate limits, request sizes, timeouts, and error-message hygiene.
+- [x] Avoid unnecessary second-model validation calls; add one only if measured benefit justifies it.
 
 Exit: adversarial and unsupported-fact cases fail safely without blocking ordinary product questions.
+
+Phase 8 completed for the internal single-process prototype on 2026-10-17. Its verified checkpoints were:
+
+| Checkpoint | Application behavior | Verification |
+| --- | --- | --- |
+| 1. Question boundary | Bearer authentication before bounded JSON reads; strict fields, 32 KiB body, 30-second read deadline and safe validation errors | 64 request-boundary tests plus earlier full-suite checkpoint |
+| 2. Scope | Clear company, general product education, off-topic, unavailable-action and unsafe requests are handled before retrieval/model/tool dispatch; generic warranty definitions remain educational | 26 initial focused routing/chat/auth checks; final focused routing/answer run 57 passed |
+| 3. Injection | Page/PDF excerpts, catalog fields, forged tool results and user override attempts cannot change code-enforced permissions or become answer instructions | 56 focused source/tool/answer checks; role-filtered private-PDF and useful-source tests added later |
+| 4. Claims | PostgreSQL remains current price/SKU authority; unsupported current identity, warranty, policy, delivery and stock claims abstain; dimensions require matching cited text; prose URLs cannot become answer links | 73 focused answer/product/chat checks; later product-description and role tests passed |
+| 5. Rate and deadline | Per-user question/tool windows, login IP/account windows, 429/Retry-After, 90-second answer budget, lower-level I/O/SQL limits and bounded Ollama output | 100 focused deadline/request/auth/rate checks; all final backend regressions passed |
+
+The final backend suite passed **510 tests**, with three opt-in live tests skipped and one existing dependency warning. A read-only check of the current 2,009-handle/3,090-variant catalog found no title, vendor, option or specification fields blocked by the refined display guard; tests preserve ordinary product titles containing “Price” and general warranty education. No second-model validation call was added. This phase exit is for tested internal behavior, not production traffic or comprehensive adversarial coverage. The process-local limiter does not coordinate multiple API processes, and cancellation cannot forcibly stop synchronous threads; their I/O and database operations have separate limits. Phase 5 full-corpus retrieval/answer failures remain open. See `IMPLEMENTATION_STATUS.md` and README for observed behavior and limits.
 
 ## Phase 9 — Conversation memory
 

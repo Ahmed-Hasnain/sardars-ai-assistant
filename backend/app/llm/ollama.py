@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 
+from app.api.answer_deadlines import remaining_timeout
 from app.core.config import Settings
 from app.llm.base import ChatMessage, ChatResult, ModelError, ModelToolCall, ToolChatResult
 
@@ -17,20 +18,24 @@ class OllamaChatModel:
             "stream": False,
             "think": False,
             "keep_alive": self.settings.ollama_keep_alive,
+            "options": {"num_predict": 256},
         }
 
         try:
             async with httpx.AsyncClient(
-                timeout=self.settings.ollama_timeout_seconds
+                timeout=remaining_timeout(self.settings.ollama_timeout_seconds)
             ) as client:
                 response = await client.post(
                     f"{self.settings.ollama_base_url.rstrip('/')}/api/chat",
                     json=payload,
+                    timeout=remaining_timeout(self.settings.ollama_timeout_seconds),
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             raise ModelError("Ollama request failed") from exc
 
+        if len(response.content) > 64 * 1024:
+            raise ModelError("Ollama response too large")
         try:
             body = response.json()
             answer = body["message"]["content"]
