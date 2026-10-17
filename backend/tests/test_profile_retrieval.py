@@ -43,6 +43,20 @@ def test_bongio_profile_lookup_and_semantic_search_share_staff_permission_filter
         assert {"key": "review_status", "match": {"value": "approved"}} in body["filter"]["must"]
 
 
+def test_company_business_question_includes_authorized_profile(monkeypatch):
+    preferred = [{"id": "profile-0"}, {"id": "profile-1"}]
+    semantic = [{"id": str(index)} for index in range(6)]
+    calls = setup(monkeypatch, preferred, semantic)
+
+    points = search_seed.search_for_role("What is the category of business in which Sardars deal?", "staff")
+
+    assert points == preferred + semantic
+    scroll, query = calls[1:]
+    assert scroll[1]["limit"] == 2 and query[1]["limit"] == 6
+    assert {condition["match"]["value"] for condition in scroll[1]["filter"]["should"]} == {"public", "staff"}
+    assert {"key": "url", "match": {"value": "https://sardarandco.com/pages/about-us"}} in scroll[1]["filter"]["must"]
+
+
 def test_missing_profile_keeps_full_semantic_budget(monkeypatch):
     calls = setup(monkeypatch, [], [{"id": "other"}])
     assert search_seed.search_for_role("What is Bongio?", "admin") == [{"id": "other"}]

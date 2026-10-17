@@ -86,3 +86,21 @@ def test_chat_routes_exact_product_price_question_to_tool_flow() -> None:
     assert response.status_code == 200
     assert response.json()["route"] == "product"
     product.assert_awaited_once()
+
+
+def test_chat_routes_combined_product_request_and_passes_followup_handles() -> None:
+    combined = ChatResponse(answer="matching product", route="product_search", model=None,
+                            product_handles=["basin-one"])
+    with patch("app.api.chat.answer_product_discovery", new_callable=AsyncMock) as discovery:
+        discovery.return_value = combined
+        first = client.post("/api/v1/chat", json={"message": "Recommend black basin mixers under 1000"})
+        followup = client.post("/api/v1/chat", json={
+            "message": "Which of these is cheaper?", "product_handles": ["basin-one"],
+        })
+    assert first.status_code == 200 and first.json()["route"] == "product_search"
+    assert followup.status_code == 200 and followup.json()["product_handles"] == ["basin-one"]
+    assert discovery.await_args.args[3] == ["basin-one"]
+    invalid = client.post("/api/v1/chat", json={
+        "message": "Which is cheaper?", "product_handles": ["../private"],
+    })
+    assert invalid.status_code == 422

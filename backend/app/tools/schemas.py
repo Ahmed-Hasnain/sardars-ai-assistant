@@ -88,6 +88,34 @@ class ProductCandidates(StrictModel):
     more_matches: bool
 
 
+class ProductSearchArguments(StrictModel):
+    question: str = Field(min_length=1, max_length=2000)
+    context_handles: list[str] = Field(default_factory=list, max_length=3)
+    prefer_descriptions: bool = False
+
+
+class ProductSearchMatch(StrictModel):
+    handle: str = Field(max_length=200)
+    title: str = Field(max_length=500)
+    vendor: str | None = Field(max_length=200)
+    sku: str = Field(max_length=200)
+    price: str = Field(max_length=80)
+    currency: str | None = Field(max_length=3)
+    source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    variant_count: int = Field(ge=1)
+    specifications: dict[str, str] = Field(default_factory=dict, max_length=6)
+
+
+class ProductSearchResults(StrictModel):
+    authority: Literal["developer_authorized_products_table"] = "developer_authorized_products_table"
+    observed_at: AwareDatetime
+    matches: list[ProductSearchMatch] = Field(max_length=3)
+    more_matches: bool = False
+    currency_unverified: bool = False
+    database_values_verified: Literal[True] = True
+    external_sync_verified: Literal[False] = False
+
+
 class ToolError(StrictModel):
     code: Literal[
         "unknown_tool", "permission_denied", "invalid_arguments", "source_not_found",
@@ -100,7 +128,7 @@ class ToolError(StrictModel):
 class ToolSuccess(StrictModel):
     tool: str = Field(max_length=64)
     ok: Literal[True] = True
-    data: SourceStatus | ProductDetails | ProductCandidates
+    data: SourceStatus | ProductDetails | ProductCandidates | ProductSearchResults
 
 
 class ToolFailure(StrictModel):

@@ -1,6 +1,6 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-15
+Last reviewed: 2026-10-17
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -235,12 +235,14 @@ Phase 6 exits when staff can reliably ask for a SKU or product price from the au
 
 Goal: answer queries needing both structured filtering and descriptive evidence.
 
-- [ ] Route category/brand/finish/price/SKU filters to structured search before retrieving descriptions for matching product IDs.
-- [ ] Support grounded product comparison and recommendation with exact prices/specifications and cited descriptive evidence.
-- [ ] Define precedence when tool data and documents disagree; show uncertainty or as-of information where appropriate.
-- [ ] Evaluate combined queries, including follow-up questions referring to previously shown products.
+- [x] Route category/brand/finish/price/SKU filters through the registered PostgreSQL `search_products` read tool before fetching descriptions by exact Shopify handle/product-page URL. Match only visible active rows and recheck registered Qdrant sources.
+- [x] Return the lowest qualifying variant's exact database SKU, price, recorded currency and catalog-listed options; show short citations from matching product pages for supported recommendations and comparisons. Unknown or hidden descriptions do not become recommendations.
+- [x] Give PostgreSQL precedence for structured facts; ignore changing price/stock claims in webpage excerpts. Show database observation time, source fetch time and explicit uncertainty for currency, inventory and external synchronization.
+- [x] Exercise numeric bounds, SKU/variant comparisons, role boundaries, missing or conflicting descriptions, and a follow-up using returned `product_handles`. Each follow-up reauthorizes and rereads its products; long-term conversation memory remains Phase 9.
 
-Exit: a request such as “black wall-mounted basin mixers under PKR 100,000” uses exact filters and only recommends verified matches with supported descriptions.
+Exit: a request such as “recommend black wall-mounted basin mixers under 1000” applies the numeric price limit to the matching variant and only recommends verified matches with supported descriptions. The response must state when currency is unrecorded; a request naming PKR or another currency must not treat an unlabelled price as that currency.
+
+Phase 7 complete for this internal proof of concept (2026-10-17). The developer chose a numeric, currency-unspecified exit while the current manually assigned prices have no verified currency. Combined lookup, description join and follow-up flow passed isolated and authenticated local checks; the full backend suite passed 404 tests with three skipped, and Alembic reported no schema drift. Explicit-currency filtering remains conditional on a recorded currency for the matching row, outside this phase's exit. See `docs/phase7_combined_product_search.md` and `IMPLEMENTATION_STATUS.md` for evidence and limits.
 
 ## Phase 8 — Guardrail hardening
 
