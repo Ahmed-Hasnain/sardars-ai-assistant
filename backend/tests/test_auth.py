@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth.security import hash_password, token_hash, verify_password
+from app.api.rate_limits import LOGIN_ACCOUNT_LIMITER, LOGIN_IP_LIMITER
 from app.auth.create_user import main as create_user_main
 from app.auth.reset_password import main as reset_password_main
 from app.db.base import Base
@@ -116,6 +117,23 @@ def test_login_is_revocable_and_stores_only_a_token_hash(local_app) -> None:
     assert client.get("/api/v1/auth/me", headers=_headers(token)).json()["role"] == "staff"
     assert client.post("/api/v1/auth/logout", headers=_headers(token)).status_code == 204
     assert client.get("/api/v1/auth/me", headers=_headers(token)).status_code == 401
+
+
+def test_login_attempts_are_bounded_per_account_and_ip(local_app, monkeypatch):
+    client, sessions = local_app
+    _create_user(sessions, "staff@example.com")
+    monkeypatch.setattr(LOGIN_ACCOUNT_LIMITER, "limit", 2)
+    monkeypatch.setattr(LOGIN_IP_LIMITER, "limit", 4)
+    wrong = {"email": "staff@example.com", "password": "wrong"}
+    assert client.post("/api/v1/auth/login", json=wrong).status_code == 401
+    assert client.post("/api/v1/auth/login", json=wrong).status_code == 401
+    blocked = client.post("/api/v1/auth/login", json={**wrong, "password": PASSWORD})
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) >= 1
+    assert blocked.json() == {"detail": "Too many requests"}
+    # Changing email cannot evade the separate socket-peer limit.
+    assert client.post("/api/v1/auth/login", json={**wrong, "email": "other@example.com"}).status_code == 401
+    assert client.post("/api/v1/auth/login", json={**wrong, "email": "third@example.com"}).status_code == 429
 
 
 def test_staff_cannot_list_users_but_admin_can(local_app) -> None:

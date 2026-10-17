@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth.security import token_hash
+from app.api.rate_limits import TOOL_LIMITER
 from app.db.base import Base
 from app.db.models import LoginSession, SourceRegistration, User
 from app.db.session import get_db
@@ -78,6 +79,17 @@ def test_authentication_precedes_body_parsing_and_execution(runtime, monkeypatch
     assert client.post(ENDPOINT, content="not json").status_code == 401
     assert client.post(ENDPOINT, content=b"x" * 9000).status_code == 401
     execute.assert_not_called()
+
+
+def test_tool_calls_are_rate_limited_before_parsing(runtime, monkeypatch):
+    client, _, headers, _ = runtime
+    monkeypatch.setattr(TOOL_LIMITER, "limit", 1)
+    assert client.post(ENDPOINT, headers=headers["staff"], json=CALL).status_code == 200
+    blocked = client.post(ENDPOINT, headers={**headers["staff"], "Content-Type": "application/json"},
+                          content=b"broken")
+    assert blocked.status_code == 429
+    assert blocked.json() == {"detail": "Too many requests"}
+    assert int(blocked.headers["Retry-After"]) >= 1
 
 
 def test_exact_metadata_read_returns_provenance_without_private_fields_or_writes(runtime):

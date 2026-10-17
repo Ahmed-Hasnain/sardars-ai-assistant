@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.db.models import User
 from app.rag.answer_seed import _approved_excerpts
+from app.rag.claim_safety import unsafe_catalog_display, unsafe_descriptive_claim
 from app.rag.text_safety import contains_prompt_instruction
 from app.retrieval.authorization import authorized_points
 from app.retrieval.search_seed import fetch_product_points
@@ -38,6 +39,7 @@ def _description(points: list[dict], url: str, specifications: dict[str, str]) -
             mentioned_finishes = {color for color in FINISH_TERMS
                                   if re.search(rf"\b{re.escape(color)}\b", sentence, re.I)}
             if (40 <= len(sentence) <= 320 and not contains_prompt_instruction(sentence)
+                    and not unsafe_descriptive_claim(sentence)
                     and not CHANGING_CLAIM.search(sentence) and not NON_DESCRIPTION.search(sentence)
                     and (not expected_finishes or not mentioned_finishes
                          or bool(expected_finishes & mentioned_finishes))):
@@ -66,6 +68,17 @@ async def answer_product_discovery(
                   if data.currency_unverified else
                   "I couldn't verify matching active products with those filters. Try a brand, category, handle, or SKU.")
         return ChatResponse(answer=answer, route="product_search", model=None)
+
+    if any(
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,199}", item.handle)
+        or not re.fullmatch(r"\d+(?:\.\d+)?", item.price)
+        or any(contains_prompt_instruction(value) or unsafe_catalog_display(value) for value in (
+            item.title, item.sku, item.vendor or "", *item.specifications.keys(),
+            *item.specifications.values(),
+        ))
+        for item in data.matches
+    ):
+        return ChatResponse(answer="The product search is unavailable right now.", route="product_search", model=None)
 
     urls = list(dict.fromkeys(
         PRODUCT_URL + item.handle for item in data.matches

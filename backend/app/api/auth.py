@@ -8,6 +8,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, get_auth_context, get_current_user, require_admin
+from app.api.login_requests import LOGIN_REQUEST_OPENAPI, parse_login_request
+from app.api.rate_limits import LOGIN_ACCOUNT_LIMITER, enforce_limit
 from app.auth.security import new_token, token_hash, verify_password
 from app.db.models import LoginSession, User
 from app.db.session import get_db
@@ -18,8 +20,12 @@ router = APIRouter(prefix="/api/v1", tags=["auth"])
 SESSION_SECONDS = 8 * 60 * 60
 
 
-@router.post("/auth/login", response_model=TokenResponse)
-def login(request: LoginRequest, db: Annotated[Session, Depends(get_db)]) -> TokenResponse:
+@router.post("/auth/login", response_model=TokenResponse, openapi_extra=LOGIN_REQUEST_OPENAPI)
+def login(
+    request: Annotated[LoginRequest, Depends(parse_login_request)],
+    db: Annotated[Session, Depends(get_db)],
+) -> TokenResponse:
+    enforce_limit(LOGIN_ACCOUNT_LIMITER, request.email)
     user = db.scalar(select(User).where(User.email == request.email))
     if not verify_password(request.password, user.password_hash if user else None):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -34,6 +40,7 @@ def login(request: LoginRequest, db: Annotated[Session, Depends(get_db)]) -> Tok
         expires_at_epoch=now + SESSION_SECONDS,
     ))
     db.commit()
+    LOGIN_ACCOUNT_LIMITER.forget(request.email)
     return TokenResponse(access_token=raw_token, expires_in_seconds=SESSION_SECONDS)
 
 

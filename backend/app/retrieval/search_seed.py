@@ -3,6 +3,7 @@ import re
 
 import httpx
 
+from app.api.answer_deadlines import remaining_timeout
 from app.core.config import Settings
 from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 from app.retrieval.authorization import ALLOWED_VISIBILITIES
@@ -32,7 +33,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
         raise ValueError("Question cannot be blank")
 
     settings = Settings()
-    with httpx.Client(timeout=settings.ollama_timeout_seconds) as client:
+    with httpx.Client(timeout=remaining_timeout(settings.ollama_timeout_seconds)) as client:
         point_filter: dict = {"must": conditions}
         if visibility is not None:
             point_filter["should"] = [
@@ -42,6 +43,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
         response = client.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/embed",
             json={"model": MODEL, "input": question, "truncate": False},
+            timeout=remaining_timeout(settings.ollama_timeout_seconds),
         )
         response.raise_for_status()
         vector = response.json()["embeddings"][0]
@@ -59,6 +61,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
                 json={"filter": {**point_filter, "must": [*conditions,
                        {"key": "url", "match": {"value": settings.brand_definition_profile_url}}]},
                       "limit": 2, "with_payload": True, "with_vector": False},
+                timeout=remaining_timeout(settings.ollama_timeout_seconds),
             )
             response.raise_for_status()
             preferred = response.json()["result"]["points"]
@@ -74,6 +77,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
                 "with_payload": True,
                 "with_vector": False,
             },
+            timeout=remaining_timeout(settings.ollama_timeout_seconds),
         )
         response.raise_for_status()
 
@@ -124,7 +128,7 @@ def fetch_product_points(urls: list[str], role: str) -> list[dict]:
         return []
     settings = Settings()
     points: list[dict] = []
-    with httpx.Client(timeout=min(settings.ollama_timeout_seconds, 10.0)) as client:
+    with httpx.Client(timeout=remaining_timeout(min(settings.ollama_timeout_seconds, 10.0))) as client:
         for url in urls:
             response = client.post(
                 f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll",
@@ -143,6 +147,7 @@ def fetch_product_points(urls: list[str], role: str) -> list[dict]:
                     "with_payload": True,
                     "with_vector": False,
                 },
+                timeout=remaining_timeout(min(settings.ollama_timeout_seconds, 10.0)),
             )
             response.raise_for_status()
             batch = response.json()["result"]["points"]

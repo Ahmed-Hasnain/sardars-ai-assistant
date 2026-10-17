@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.api.request_limits import bounded_body
+from app.api.rate_limits import TOOL_LIMITER, enforce_limit
 from app.auth.dependencies import get_current_user
 from app.db.models import User
 from app.db.session import get_db
@@ -27,6 +28,8 @@ async def execute(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ToolResult:
+    if isinstance(getattr(user, "id", None), int):
+        enforce_limit(TOOL_LIMITER, user.id)
     if request.headers.get("content-type", "").split(";")[0].lower() != "application/json":
         raise HTTPException(415, "Use application/json")
     try:

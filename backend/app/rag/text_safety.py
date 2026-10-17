@@ -5,7 +5,9 @@ import re
 PATTERNS = (
     re.compile(r"\b(?:ignore|disregard|override|forget)\b.{0,100}\b(?:instructions?|rules?|prompts?)\b", re.I),
     re.compile(r"\b(?:reveal|leak|print|expose)\b.{0,100}\b(?:secrets?|passwords?|tokens?|system prompts?)\b", re.I),
-    re.compile(r"(?m)^\s*(?:system|developer|assistant)\s*:", re.I),
+    re.compile(r"(?m)^\s*(?:#{1,6}\s*)?(?:system|developer|assistant)\s*:", re.I),
+    re.compile(r"(?:<\|im_start\|>\s*(?:system|developer|assistant)|\[INST\]|\[/INST\])", re.I),
+    re.compile(r"\b(?:act as|pretend to be)\b.{0,80}\b(?:system|developer|administrator|admin)\b", re.I),
 )
 
 

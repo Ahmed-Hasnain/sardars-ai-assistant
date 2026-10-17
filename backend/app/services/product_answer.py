@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.db.models import User
+from app.rag.text_safety import contains_prompt_instruction
+from app.rag.claim_safety import unsafe_catalog_display
 from app.schemas.chat import ChatResponse, ProductSource
 from app.tools.registry import execute_tool
 from app.tools.schemas import ProductCandidates, ProductDetails, ToolInvocation, ToolSuccess
@@ -62,11 +64,25 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
             answer = NO_PRODUCT
         return ChatResponse(answer=answer, route="product", model=None)
     if isinstance(result.data, ProductCandidates):
+        if any(contains_prompt_instruction(item.title or "") or unsafe_catalog_display(item.title or "")
+               for item in result.data.matches):
+            return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
         return ChatResponse(answer=_render_candidates(result.data), route="product", model=None,
                             company_data_verified=True)
     if not isinstance(result.data, ProductDetails):
         return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
     data = result.data
+    display_fields = [data.title or "", data.vendor or "", data.handle]
+    for variant in data.variants:
+        display_fields.extend(value or "" for value in (
+            variant.sku, variant.option1_name, variant.option1_value,
+            variant.option2_name, variant.option2_value,
+            variant.option3_name, variant.option3_value,
+        ))
+    if (any(contains_prompt_instruction(value) or unsafe_catalog_display(value)
+            for value in display_fields)
+        or any(not re.fullmatch(r"\d+(?:\.\d+)?", variant.price) for variant in data.variants)):
+        return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
     source = ProductSource(
         source_file_sha256=data.source_file_sha256,
         database_observed_at=data.observed_at,

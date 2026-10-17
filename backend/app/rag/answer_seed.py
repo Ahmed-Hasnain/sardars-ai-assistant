@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 from app.ingestion.public_site import source_type
 from app.ingestion.documents import valid_source
 from app.rag.text_safety import contains_prompt_instruction as _contains_prompt_instruction
+from app.rag.claim_safety import UNVERIFIED_BUSINESS_FACT, unsafe_descriptive_claim
 from app.llm.base import ChatMessage, ChatModel
 from app.llm.ollama import OllamaChatModel
 from app.retrieval.search_seed import is_company_overview_question, search_approved
@@ -164,6 +165,7 @@ def _matching_sentences(
             if (
                 len(sentence) > MAX_SENTENCE_CHARS
                 or _contains_prompt_instruction(sentence)
+                or unsafe_descriptive_claim(sentence)
             ):
                 continue
             if not required.issubset(_terms(sentence)):
@@ -252,7 +254,8 @@ def _judge_sentences(excerpts: list[Evidence]) -> list[Evidence]:
             sentence = " ".join(raw.split())
             if (not 35 <= len(sentence) <= MAX_SENTENCE_CHARS
                 or sentence in seen_text or _contains_prompt_instruction(sentence)
-                or CHANGING_FACT_PATTERN.search(sentence)):
+                or CHANGING_FACT_PATTERN.search(sentence)
+                or unsafe_descriptive_claim(sentence)):
                 continue
             cost = len(excerpt.title) + len(sentence) + 24
             if used_chars + cost > MAX_EVIDENCE_CHARS:
@@ -307,7 +310,7 @@ async def answer_from_points(
     """Use matching source sentences and reject unsupported model output."""
     if not question.strip():
         raise ValueError("Question cannot be blank")
-    if CHANGING_FACT_PATTERN.search(question):
+    if CHANGING_FACT_PATTERN.search(question) or UNVERIFIED_BUSINESS_FACT.search(question):
         return CitedAnswer(FALLBACK, [])
 
     excerpts = _approved_excerpts(points)
