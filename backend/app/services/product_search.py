@@ -32,7 +32,12 @@ STOP = frozenset({
     "their", "these", "this", "to", "under", "which", "with", "you", "your", "what", "would",
     "be", "best", "better", "one", "ones", "them", "those", "details", "tell", "give", "list",
     "pkr", "rs", "usd", "between", "below", "above", "least", "most", "up", "less", "over",
+    "ok", "okay", "get", "find", "browse", "see", "could", "want", "need",
+    "there", "sell", "sells", "sold", "offer", "offers", "carry", "carries", "stock",
+    "looking", "interested", "collection", "collections", "range", "ranges",
+    "check", "database", "some", "now", "kind", "category", "categories",
 })
+BROAD_BROWSE = re.compile(r"\b(?:products|catalog|catalogue|items)\b", re.I)
 FINISH_TERMS = frozenset({"black", "white", "chrome", "gold", "silver", "gunmetal", "bronze", "copper"})
 PRODUCT_TYPE_TERMS = frozenset({"basin", "mixer", "shower", "bath", "toilet", "sink", "faucet", "tap", "tile", "vanity"})
 
@@ -74,17 +79,49 @@ def _price_filter(question: str) -> tuple[Decimal | None, Decimal | None, str | 
 def _terms(question: str) -> list[str]:
     without_price = PRICE_BETWEEN.sub(" ", PRICE_LIMIT.sub(" ", question))
     return list(dict.fromkeys(
-        (word[:-1] if word.endswith("s") and not word.endswith("ss") and len(word) > 4 else word)
+        word
         for word in TOKEN.findall(without_price.casefold().replace("-", " "))
         if len(word) >= 3 and word not in STOP and not word.isdecimal()
     ))[:MAX_TERMS]
 
 
+def _forms(term: str) -> tuple[str, ...]:
+    if term.endswith("ies") and len(term) > 4:
+        return term, term[:-3] + "y"
+    if term.endswith("s") and not term.endswith("ss") and len(term) > 3:
+        return term, term[:-1]
+    return (term,)
+
+
+def _requested_category(db: Session, allowed: set[str], question: str) -> tuple[str, set[str]] | None:
+    """Resolve an explicitly named visible catalog category without a hardcoded list."""
+    question_words = TOKEN.findall(question.casefold().replace("-", " "))
+    if not question_words:
+        return None
+    categories = db.scalars(select(Product.meta_custom_category).where(
+        Product.visibility.in_(allowed), Product.source_row_kind == "variant",
+        Product.meta_custom_category.is_not(None),
+    ).distinct()).all()
+    matches: list[tuple[str, set[str]]] = []
+    for category in categories:
+        category_words = TOKEN.findall(category.casefold().replace("-", " "))
+        if category_words and all(
+            any(set(_forms(word)) & set(_forms(candidate)) for candidate in question_words)
+            for word in category_words
+        ):
+            matches.append((category, set(category_words)))
+    matches.sort(key=lambda item: (len(item[1]), len(item[0])), reverse=True)
+    if not matches or (len(matches) > 1 and len(matches[0][1]) == len(matches[1][1])):
+        return None
+    return matches[0]
+
+
 def _term_exists(handle_column, allowed: set[str], term: str):
     row = aliased(Product)
+    forms = _forms(term)
     if term in FINISH_TERMS:
         fields = (row.title, row.handle, row.option1_value, row.option2_value, row.option3_value)
-    elif term in PRODUCT_TYPE_TERMS:
+    elif any(form in PRODUCT_TYPE_TERMS for form in forms):
         fields = (row.title, row.handle)
     else:
         fields = (row.title, row.handle, row.vendor, row.product_category, row.meta_custom_category,
@@ -92,7 +129,8 @@ def _term_exists(handle_column, allowed: set[str], term: str):
                   row.option1_value, row.option2_value, row.option3_value)
     return exists(select(1).where(
         row.handle == handle_column, row.visibility.in_(allowed),
-        or_(*(func.lower(field).contains(term, autoescape=True) for field in fields)),
+        or_(*(func.lower(field).contains(form, autoescape=True)
+              for field in fields for form in forms)),
     ))
 
 
@@ -174,7 +212,8 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
                 ).distinct().limit(2)).all()
                 if not candidates:
                     candidates = db.scalars(identity_query.where(
-                        *(func.lower(Product.title).contains(word, autoescape=True) for word in part_terms),
+                        *(or_(*(func.lower(Product.title).contains(form, autoescape=True)
+                                for form in _forms(word))) for word in part_terms),
                     ).distinct().limit(2)).all()
                 if len(candidates) != 1:
                     named_handles = []
@@ -185,8 +224,15 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
         for identifier in [*embedded, *(sku for _, sku in sku_rows)]:
             term_question = re.sub(re.escape(identifier), " ", term_question, flags=re.I)
         terms = _terms(term_question)
+        requested_category = _requested_category(db, allowed, term_question) if not handles else None
+        if requested_category:
+            category, category_words = requested_category
+            terms = [term for term in terms if not any(
+                set(_forms(term)) & set(_forms(word)) for word in category_words
+            )]
         finishes = [term for term in terms if term in FINISH_TERMS]
-        if not handles and not terms:
+        if (not handles and not terms and minimum is None and maximum is None
+            and not BROAD_BROWSE.search(args.question) and not requested_category):
             return empty(currency_unverified=bool(currency))
 
         base = select(Product.handle).where(
@@ -196,6 +242,8 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
         if handles:
             base = base.where(Product.handle.in_(handles))
         else:
+            if requested_category:
+                base = base.where(Product.meta_custom_category == category)
             for term in terms:
                 base = base.where(_term_exists(Product.handle, allowed, term))
         priced = aliased(Product)

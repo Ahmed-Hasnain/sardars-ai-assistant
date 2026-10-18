@@ -54,6 +54,7 @@ class WindowLimiter:
 
 QUESTION_LIMITER = WindowLimiter(20, 60)
 TOOL_LIMITER = WindowLimiter(60, 60)
+HISTORY_LIMITER = WindowLimiter(60, 60)
 LOGIN_IP_LIMITER = WindowLimiter(60, 60)
 LOGIN_ACCOUNT_LIMITER = WindowLimiter(6, 60)
 

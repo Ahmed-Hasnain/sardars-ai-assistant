@@ -18,6 +18,7 @@ MAX_QUESTION_BODY_BYTES = 32 * 1024
 QUESTION_REQUEST_OPENAPI = {
     "requestBody": {"required": True, "content": {"application/json": {
         "schema": ChatRequest.model_json_schema(),
+        "example": {"message": "What is a mixer?"},
     }}},
 }
 

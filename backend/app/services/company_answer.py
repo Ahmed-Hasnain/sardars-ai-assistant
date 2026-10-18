@@ -13,9 +13,10 @@ from app.retrieval.search_seed import search_for_role
 
 
 async def answer_company(
-    question: str, role: str, db: Session, model: ChatModel
+    question: str, role: str, db: Session, model: ChatModel,
+    *, search_query: str | None = None,
 ) -> CitedAnswer:
-    points = await asyncio.to_thread(search_for_role, question, role)
+    points = await asyncio.to_thread(search_for_role, search_query or question, role)
     points = authorized_points(db, role, points)
     answer = await answer_from_points(question, points, model)
     if answer.text == FALLBACK:

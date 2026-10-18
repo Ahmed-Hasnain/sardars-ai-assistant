@@ -1,6 +1,6 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-17
+Last reviewed: 2026-10-18
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -272,26 +272,30 @@ The final backend suite passed **510 tests**, with three opt-in live tests skipp
 
 Goal: persist conversations and support follow-up questions with bounded context.
 
-- [ ] Add users/roles as needed, conversations, messages, ownership checks, and migrations.
-- [ ] Save messages, model metadata, timing/token counts when available, and only necessary tool/source references.
-- [ ] Send a bounded recent history; preserve product references needed for follow-ups.
-- [ ] Add conversation summaries only if actual usage requires them; never confuse a summary with company evidence.
-- [ ] Define retention and deletion behavior for staff conversation data.
+- [x] Reuse existing users/roles; add conversations, messages, ownership checks, and a migration.
+- [x] Save completed turns, model metadata, timing/token counts when available, and only necessary source IDs/product handles.
+- [x] Send bounded recent context for recognizable follow-ups; preserve product handles and reread current values through authorized tools.
+- [x] Defer conversation summaries until measured usage requires them; never treat conversation history as company evidence.
+- [x] Define a configurable 30-day rolling expiry, immediate owner deletion, and a bounded physical-purge command for staff conversation data.
 
 Exit: users can continue and review their own conversations, and follow-ups resolve correctly without unbounded prompts.
+
+Phase 9 completed for the internal prototype on 2026-10-17. An authenticated `/chat` turn creates or continues an owned PostgreSQL conversation; list, paged review and delete endpoints enforce ownership and current role. Recognizable general follow-ups use at most eight recent messages and 1,600 history characters; company follow-ups can expand the search query without treating prior chat as evidence, and product follow-ups reuse handles only for fresh authorized PostgreSQL searches. Independent topics drop old prompt context. Source and product visibility are rechecked when reviewing historical answers, and failed or timed-out turns are not saved. The additive migration applied to local PostgreSQL and `alembic check` found no drift; an authenticated PostgreSQL API smoke check passed. The final backend suite passed **537 tests**, with three opt-in live tests skipped and one existing dependency warning. No summary was added because there is no measured need; the keyword-based follow-up boundary and 30-day physical purge scheduling remain prototype limitations. See `IMPLEMENTATION_STATUS.md` and README.
 
 ## Phase 10 — Frontend and streaming
 
 Goal: a usable, responsive chat experience for Sardars admins and internal staff.
 
-- [ ] Choose React or Next.js based on actual hosting and product needs.
-- [ ] Build new chat, history/sidebar, Markdown display, source links, loading/error/retry states, and mobile layouts.
-- [ ] Add streaming, initially via SSE if it fits the API; keep streaming separate from retrieval and generation logic.
-- [ ] Make source references clear and show them only to roles authorized for those sources.
-- [ ] Ensure high-impact company claims are verified before they are shown, including during streaming.
-- [ ] Apply suitable accessibility and visual polish without delaying backend correctness.
+- [x] Choose React or Next.js based on actual hosting and product needs.
+- [x] Build new chat, history/sidebar, Markdown display, source links, loading/error/retry states, and mobile layouts.
+- [x] Add streaming, initially via SSE if it fits the API; keep streaming separate from retrieval and generation logic.
+- [x] Make source references clear and show them only to roles authorized for those sources.
+- [x] Ensure high-impact company claims are verified before they are shown, including during streaming.
+- [x] Apply suitable accessibility and visual polish without delaying backend correctness.
 
 Exit: an authorized staff user can ask, read cited answers, recover from errors, and return to earlier conversations on desktop and mobile.
+
+Phase 10 completed for the internal prototype on 2026-10-18. React/Vite/TypeScript and Zustand support owned conversation history, safe Markdown, authorized citations and source-file downloads, retryable errors, and responsive desktop/mobile layouts. `POST /api/v1/chat/stream` sends SSE answer chunks only after the existing answer checks and PostgreSQL save complete; this is buffered delivery streaming, not raw model-token streaming. Backend tests covered the stream, ownership, source revocation and role changes; frontend tests, production build and mocked-API Chrome desktop/mobile flows covered login, retry, answer delivery, citations, refresh, history, keyboard focus and layout. Production hosting/auth hardening remains Phase 13; full-corpus retrieval regressions remain open from Phase 5. See `IMPLEMENTATION_STATUS.md` for verification details.
 
 ## Phase 11 — Full evaluation
 
@@ -342,4 +346,15 @@ Capture structured logs/metrics for request and conversation IDs, model/embeddin
 - Add write/action tools only with confirmed workflows and audit trails.
 - Add multi-company configuration after Sardars has proven the shared boundaries; do not hardcode core infrastructure to one brand, but do not build tenancy before it is needed.
 - Add Redis, rerankers, advanced orchestration, S3, or broader deployment infrastructure only when evidence justifies them.
+
+## Deferred follow-up backlog — revisit after the current roadmap
+
+These are requested future decisions and features, not work already implemented or permission to clear existing data. Revisit their order after Phase 11 establishes a quality and latency baseline; keep the current internal authorization, source visibility, bounded tools, and PostgreSQL authority for exact/current product facts while evaluating alternatives.
+
+1. [ ] **Close the Phase 5 full-corpus retrieval regressions.** Reproduce the saved-crawl and seed failures, classify each by extraction, coverage, ranking, evidence selection, or answer generation, then rerun the same evaluations. Record before/after relevance, citation and abstention results; do not treat a different authorized citation as the same failure as missing evidence or a service error.
+2. [ ] **Decide whether ingestion needs a background worker.** Measure request duration, queueing, failed-job recovery and resource use for uploads and sitemap imports. Compare the current durable-job synchronous runner with a small dedicated worker and with Celery plus a broker. Choose Celery only if its scheduling, retry, concurrency and operational costs are justified. Preserve job ownership, leases, idempotency, status/progress, bounded retries and safe publication across PostgreSQL and Qdrant.
+3. [ ] **Evaluate model-assisted tool choice after bounded RAG retrieval.** Compare today's inspectable query routing and direct PostgreSQL calls with a flow that retrieves a small authorized evidence set, gives the model only that set and an explicit allowlist of tools, then lets it request a tool call. Do not send the full corpus. Measure tool-choice accuracy, unsupported-claim rate, latency and cost on realistic questions, including questions with no trigger keywords. The application must still validate calls, enforce roles, recheck sources and read current SKU/price values from PostgreSQL; the model cannot grant itself access or decide that a stale page is authoritative.
+4. [ ] **Design and complete a fresh-account-to-ingestion user journey.** Decide whether “anyone can register” means open account creation with staff approval, invitation-only staff signup, or a separate unprivileged pending role. A new account must not self-assign admin/staff privileges. Both approved admins and staff should be able to upload PDFs/files and submit allowed URLs or sitemaps; define whether each source is private to the submitter, shared with staff, or admin-only. Add the signup and upload/sitemap UI once those rules are set. For the proposed fresh-start exercise, inventory and back up the current RAG source/job/snapshot tables, stored originals and Qdrant collection, specify exactly which data will be cleared, and run a reversible reset procedure before ingesting the new account's PDF/TXT/Markdown files and sitemap. Preserve users, conversations and the authoritative product tables unless the reset plan explicitly includes them. Extend the existing bounded single-URL import into an authenticated sitemap crawl with domain/robots/size/page limits. Stage crawl records and content references durably before enqueueing indexing work, preserving source provenance; store large originals outside PostgreSQL if appropriate. Expose job progress, retries and update/deletion behavior. Decide supported DOCX/OCR formats separately. The chosen worker should extract, chunk, embed and publish sources; verify that the new account can retrieve only authorized indexed content and that failures do not publish partial or invisible data.
+5. [ ] **Add a bounded internet-search tool.** Choose a self-hosted or approved search provider and define network/privacy limits, timeouts, result count, domain safety, caching and citation provenance. Treat search results as untrusted, distinguish them from authorized Sardars sources, and never use them alone to assert current Sardars price, stock, policy or other controlled facts. Test authorization, injection, unavailable results and answer citations.
+6. [ ] **Run a live end-to-end acceptance pass for the new flow.** Use a disposable account and controlled documents/sitemap to test signup or approval, upload, job progress, indexed retrieval, source revocation, failed-job recovery, browser refresh, and cleanup across PostgreSQL, stored originals and Qdrant. Record what remains after the test and compare its answer quality with the Phase 11 baseline.
 

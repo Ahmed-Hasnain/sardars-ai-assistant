@@ -34,6 +34,37 @@ def test_chat_returns_unverified_answer() -> None:
     assert mock_chat.await_args.args[0][-1]["content"] == "Hello"
 
 
+def test_stream_sends_complete_checked_answer_and_metadata() -> None:
+    result = ChatResult("A mixer controls water flow. " * 8, "test-model", 5, 30, 10.0)
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, return_value=result):
+        response = client.post("/api/v1/chat/stream", json={"message": "What is a mixer?"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    events = [part for part in response.text.split("\n\n") if part]
+    assert events[0].startswith("event: start\n")
+    assert sum(part.startswith("event: chunk\n") for part in events) > 1
+    assert events[-1].startswith("event: complete\n")
+    import json
+    payload = json.loads(events[-1].split("data: ", 1)[1])
+    assert payload["answer"] == result.text
+    assert payload["route"] == "general"
+
+
+def test_stream_never_sends_unverified_claim_or_partial_error() -> None:
+    result = ChatResult("Sardars guarantees delivery tomorrow.", "test-model", 5, 7, 10.0)
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, return_value=result):
+        response = client.post("/api/v1/chat/stream", json={"message": "What is a mixer?"})
+    assert response.status_code == 200
+    assert "guarantees delivery" not in response.text
+
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, side_effect=ModelError("private")):
+        failed = client.post("/api/v1/chat/stream", json={"message": "What is a mixer?"})
+    assert failed.status_code == 503
+    assert failed.headers["content-type"].startswith("application/json")
+    assert "private" not in failed.text
+
+
 def test_chat_rejects_blank_message() -> None:
     response = client.post("/api/v1/chat", json={"message": "   "})
     assert response.status_code == 422
@@ -134,6 +165,49 @@ def test_chat_routes_combined_product_request_and_passes_followup_handles() -> N
         "message": "Which is cheaper?", "product_handles": ["../private"],
     })
     assert invalid.status_code == 422
+
+
+@pytest.mark.parametrize("message", [
+    "ok tell me what products i can get under 10000",
+    "ok tell me what products i can get",
+    "Show me basin mixers",
+    "Show me fans",
+    "Do you have fans?",
+    "What fans does Sardars offer?",
+    "please check database and find some fans from products",
+    "tell me now , do you sell fans ?",
+    "what kind of fans fo sardars sell",
+    "Show me kitchen accessories",
+    "Find outdoor lighting",
+])
+def test_natural_browsing_questions_use_catalog_tool_flow(message) -> None:
+    with (
+        patch("app.api.chat.answer_product_discovery", new_callable=AsyncMock) as discovery,
+        patch("app.api.chat.answer_company", new_callable=AsyncMock) as company,
+    ):
+        discovery.return_value = ChatResponse(answer="catalog sample", route="product_search", model=None)
+        response = client.post("/api/v1/chat", json={"message": message})
+    assert response.status_code == 200
+    assert response.json()["route"] == "product_search"
+    discovery.assert_awaited_once()
+    company.assert_not_called()
+
+
+def test_broad_discovery_wording_does_not_hide_company_policy_answer() -> None:
+    with (
+        patch("app.api.chat.answer_product_discovery", new_callable=AsyncMock) as discovery,
+        patch("app.api.chat.answer_company", new_callable=AsyncMock) as company,
+    ):
+        discovery.return_value = ChatResponse(answer="No catalog matches", route="product_search", model=None)
+        company.return_value = CitedAnswer("The policy is documented. [1]", [
+            CitedSource(1, "a" * 64, "Returns", "https://sardarandco.com/pages/returns", None),
+        ])
+        response = client.post("/api/v1/chat", json={"message": "Show me your return policy"})
+    assert response.status_code == 200
+    assert response.json()["route"] == "company"
+    assert response.json()["sources"][0]["title"] == "Returns"
+    discovery.assert_awaited_once()
+    company.assert_awaited_once()
 
 
 @pytest.mark.parametrize("message,expected", [

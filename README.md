@@ -1,6 +1,6 @@
 # Sardars AI Assistant
 
-A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. The current implementation has a FastAPI backend, PostgreSQL, Alembic migrations, revocable internal login, health checks, local-model chat through Ollama, and an approved-source Qdrant answer prototype.
+A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. This monorepo contains the FastAPI backend and a React/Vite/TypeScript frontend. The backend provides PostgreSQL-backed conversations, revocable internal login, local-model chat through Ollama, and authorized Qdrant retrieval.
 
 ## Local setup
 
@@ -28,13 +28,36 @@ Start the API in another terminal:
 
 Check http://127.0.0.1:8000/api/v1/health for API liveness and http://127.0.0.1:8000/api/v1/ready for database readiness.
 
+Run the frontend in a second terminal (Node.js 20.19+ or 22.12+):
+
+    cd frontend
+    npm ci
+    npm run dev
+
+Open http://127.0.0.1:5173 and sign in with an existing admin or staff account. Vite proxies `/api` to the local FastAPI server on port 8000; the browser does not need a separate CORS allowance. The frontend supports sign-in, new and follow-up chats, safe Markdown, returned citations, retry after an API error, and a sidebar of owned conversations. The list shows a short preview of each conversation's first question. Open one to read its latest 50 messages and load older pages; earlier answers are marked as historical because business facts may have changed. Historical citations are reconstructed only while each source is currently active, indexed and visible to your role. Uploaded source links download through the authenticated API. Answer text may link only to URLs in its returned citations.
+
+The browser keeps the bearer token and active conversation ID in this tab's `sessionStorage` so refresh can restore the chat. On startup, the frontend checks the token with `/auth/me` before showing any saved conversation; logout or HTTP 401 clears it. Closing the tab ends this browser-side session, and the backend still enforces its eight-hour token expiry and role/source visibility. Browser storage is accessible to JavaScript, so a later production authentication design should use an HTTP-only cookie and its CSRF controls. The browser uses `POST /api/v1/chat/stream` for SSE delivery. The API authenticates, checks and saves the whole answer before sending any text, so it cannot leak an unverified intermediate company claim; the first chunk arrives after generation finishes. `POST /api/v1/chat` remains a JSON option. Production static hosting is Phase 13 work: serve `frontend/dist/` and reverse-proxy `/api` to FastAPI on the same origin.
+
+Frontend checks:
+
+    cd frontend
+    npm test
+    npm run build
+    npm run test:browser
+
+The browser smoke uses installed Google Chrome and a mocked API to exercise desktop/mobile login, retry, streaming, source links and downloads, refresh, history, focus and layout. It does not require a staff password or Ollama; use the local app for a live credentialed check.
+
 Run the smoke tests while PostgreSQL is running:
 
     PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests
 
 Stop PostgreSQL with `docker compose stop db`; its data is retained. Keep `.env` and `backend/.venv/` out of Git.
 
-For daily development, run `./scripts/dev.sh` from the project root. It starts PostgreSQL and Qdrant through Docker Compose, applies pending database migrations, starts the installed Ollama system service if needed, runs FastAPI, and follows all four services' logs in one terminal. If Ollama is stopped, `sudo` may ask for your password. Press Ctrl+C to stop FastAPI and the log followers; the Docker containers and Ollama service remain running. Stop the containers later with `docker compose stop db qdrant`.
+For daily development, run one command from the project root:
+
+    ./scripts/dev.sh
+
+It starts PostgreSQL and Qdrant through Docker Compose, applies pending database migrations, starts the installed Ollama system service if needed, and runs FastAPI and the Vite frontend together. Open http://127.0.0.1:5173/ for the assistant or http://127.0.0.1:8000/docs for the API. If the frontend dependencies are missing, the script installs the locked packages with `npm ci`; the Python environment and first admin account still require the initial setup above. If Ollama is stopped, `sudo` may ask for your password. Press Ctrl+C to stop both app servers and the log followers; the Docker containers and Ollama service remain running. Stop the containers later with `docker compose stop db qdrant`.
 
 ## Internal login and roles
 
@@ -61,17 +84,37 @@ With Ollama and the API running, send a request from Postman using the bearer to
 
 `POST /api/v1/chat` sends clear educational questions such as “What is a database?” to local Ollama. Product-price and SKU questions use a registered PostgreSQL read tool; combined product searches add authorized product-page descriptions; other Sardars questions use registered-source retrieval. The response has `route: general`, `product`, `product_search`, or `company`. Exact product answers use the developer-authorized current database values, include `product_source` and set `company_data_verified: true` after a successful read. Combined product answers return a `products` array and matching descriptive `sources`. Currency, stock and external Shopify/ERP synchronization remain unknown. Other company answers include numbered `sources` with `source_id`, title, Sardars URL, and `fetched_at`; unsupported questions have no citations. General answers have no company sources and may include model token counts and duration. The Ollama settings in `.env.example` default to `qwen3:0.6b` on localhost with `keep_alive=0` to unload the model after each request.
 
-For a company-overview example, send `{"message":"What is the category of business in which Sardars deal?"}`. The application places the registered About Us page within the eight-candidate retrieval limit, rechecks source permissions, and gives short source sentences plus the question to local Ollama. When exact-word matching finds no answer, the model may select a supporting sentence or abstain; the application returns only the selected source sentence and its validated citation. A successful local check returned the About Us sentence about luxury sanitary products with `route: company` and `model: qwen3:0.6b`. This model-judged fallback is deliberately limited to broad company-overview questions. Specific identity, policy, price, stock, and product-feature questions retain stricter checks because the small model selected unrelated evidence when allowed to judge all company questions. If no authorized company-page evidence remains, the answer abstains without a citation.
+For a company-overview example, send `{"message":"What is the category of business in which Sardars deal?"}`. The application places the registered About Us page within the eight-candidate retrieval limit, rechecks source permissions, and gives short source sentences plus the question to local Ollama. When exact-word matching finds no answer, the model may select a supporting sentence or abstain; the application returns only the selected source sentence and its validated citation. Natural About Us questions such as “Tell me about Sardars” and broad brand-offering questions now select directly supporting About Us sentences without requiring every question word to appear in the same sentence. A two-part “what is Sardars and what brands do they offer?” question can cite both source sentences. Single-name brand definitions such as “What is Bongio?” inspect authorized company-page evidence before the three-sentence answer cap, so matching product descriptions cannot crowd out that definition. This relaxation applies to descriptive company overview and brand lists; policy, price, stock, and product-feature claims retain stricter evidence requirements because the small model selected unrelated evidence when allowed to judge all company questions. If no authorized company-page evidence remains, the answer abstains without a citation.
 
 Both `/api/v1/chat` and `/api/v1/ask` authenticate before reading the question body. Send `Content-Type: application/json` with a `message` of up to 2,000 characters and optionally up to three `product_handles`. Unknown fields, including client-supplied roles or system prompts, are rejected. The actual streamed body is capped at 32 KiB with a total 30-second read deadline; the byte budget accommodates escaped Unicode within the character limit. Missing/invalid/revoked authentication returns HTTP 401, oversized bodies 413, unsupported media types 415, invalid JSON or fields 422, stalled body reads 408, and interrupted reads 400. Validation errors return a short message without echoing submitted text.
 
 Phase 8 also gives `/chat` a narrow scope decision: general product education remains available, Sardars-specific questions use authorized sources or registered PostgreSQL tools, and clear off-topic, instruction-override, private-data and unsupported-action requests return a short response without calling an answer service. `/ask` abstains on the latter requests. Retrieved page/PDF sentences and product tool fields are checked for instruction text before they reach a prompt or answer. Current CEO, policy, warranty, delivery, stock and similar changing claims are not verified by descriptive pages; those answers abstain until an authoritative source and freshness rule are recorded. Dimensions need exact matching cited evidence. Direct URLs in descriptive excerpts are excluded; returned citation links still follow source authorization. The general model's answer is discarded if it adds a Sardars-specific claim.
+
+Broad browsing phrases such as `{"message":"What products can I get under 10000?"}` and `{"message":"Show me basin mixers"}` now use the bounded PostgreSQL product search. Requests without a category return at most three active, visible products and indicate when more matches exist. Price limits without an explicit currency compare the stored numeric values; the response labels currency as unrecorded rather than assuming PKR or USD. Broad catalog ordering is by handle for now, so add a category, brand, or finish for more useful results.
 
 Process-local limits allow 20 combined `/chat` and `/ask` requests per user per minute and 60 registered tool calls per user per minute. Login allows 60 attempts per socket IP and six per normalized account per minute; successful login clears that account's failure window. A limit returns HTTP 429 and `Retry-After`. Login JSON is bounded to 2 KiB and the same 30-second body-read deadline. Answer generation has a configurable 90-second total deadline (`SARDARS_ANSWER_TIMEOUT_SECONDS`, 5–180), while the shorter product-route limits remain in place. The Ollama adapter requests no more than 256 generated tokens and rejects responses over 64 KiB. Answer timeouts return HTTP 504 without partial citations. Limits are held in each API process; shared deployment limits and proxy IP handling belong to production work. Cancellation cannot forcibly stop an already running synchronous thread, so retrieval HTTP calls and PostgreSQL statements have their own timeouts.
 
 Run the focused request/guardrail checks with:
 
     PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_question_requests.py backend/tests/test_rate_limits.py backend/tests/test_answer_deadlines.py backend/tests/test_ollama_limits.py backend/tests/test_chat.py backend/tests/test_auth.py
+
+## Conversation memory
+
+The first authenticated `POST /api/v1/chat` turn creates a conversation and returns `conversation_id`. Send that ID with a later message to continue it, for example `{"message":"How does it work?","conversation_id":"<returned-id>"}`. Omitting the ID starts a new conversation. `/api/v1/ask` remains stateless and rejects `conversation_id`. Use `GET /api/v1/conversations` to list your conversations, `GET /api/v1/conversations/{id}` to review a bounded page of messages, and `DELETE /api/v1/conversations/{id}` to remove one immediately. History pages accept `limit` (1–50) and `before_message_id`; list requests accept `limit` (1–50) and `offset` (0–1000). Conversation history requests allow 60 calls per user per minute and require the same revocable bearer login.
+
+In Swagger `/docs`, send only `{"message":"What is a mixer?"}` for the first turn. Copy the returned `conversation_id` into the next `/chat` request. Do not submit generated placeholder values for `conversation_id` or `product_handles`; Swagger does not track chat sessions automatically.
+
+The application includes at most eight recent general-route messages and 1,600 history characters for a recognizable follow-up, stopping at the most recent independent question. Company follow-ups may add the previous question to the *retrieval query* but still answer the current question from freshly authorized evidence. Product follow-ups carry only the immediately previous product handles and rerun the authorized PostgreSQL search; old prices and SKUs are never treated as current facts. Conversation text is separate from company knowledge. There is no rolling model summary yet because the current use case has no measured need for one.
+
+Conversations expire 30 days after their last completed turn by default (`SARDARS_CONVERSATION_RETENTION_DAYS`, 1–365). Expired conversations are unavailable through the API; run the following command periodically to physically delete expired rows. The local prototype does not include a background scheduler, so deployment must schedule this command if automatic physical deletion is required:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m app.services.purge_conversations
+
+History shows when an answer was created and warns that old business facts may be stale. Answers backed by a now-revoked source or hidden product are redacted on read. A conversation used while an account has admin access becomes admin-only; if that account is later downgraded, its owner can delete the conversation but cannot read or continue it. Successful turns store messages, model/timing/token metadata when present, source IDs and product handles. Failed and timed-out turns are not saved.
+
+Run the focused memory checks with:
+
+    PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_conversations.py
 
 ## Public source extraction sample
 

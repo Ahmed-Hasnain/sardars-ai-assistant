@@ -15,15 +15,26 @@ COMPANY_OVERVIEW = re.compile(
     re.I,
 )
 COMPANY_REFERENCE = re.compile(r"\b(?:sardars?|you|your|yours|we|our|ours)\b", re.I)
+COMPANY_IDENTITY_QUESTION = re.compile(
+    r"^\s*(?:what is|who are|tell me about|describe)\s+sardars\s*\??\s*$", re.I,
+)
 
 
 def is_company_overview_question(question: str) -> bool:
     return bool(COMPANY_REFERENCE.search(question) and COMPANY_OVERVIEW.search(question))
 
 
+def is_company_identity_question(question: str) -> bool:
+    return bool(COMPANY_IDENTITY_QUESTION.fullmatch(question))
+
+
 def _needs_company_profile(question: str) -> bool:
     return bool(
         re.fullmatch(r"\s*what is bongio\s*\??\s*", question, re.I)
+        or (re.search(r"\bbrands\b", question, re.I)
+            and re.search(r"\b(?:sardars?|they|you|your|our|we|offer\w*|carr(?:y|ies)|sell\w*)\b",
+                          question, re.I))
+        or is_company_identity_question(question)
         or is_company_overview_question(question)
     )
 
