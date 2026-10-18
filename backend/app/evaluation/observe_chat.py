@@ -91,9 +91,11 @@ def observe(model: ChatModel) -> Iterator[Observation]:
         stack.enter_context(patch.object(chat, "chat_model", ObservedModel(model, observation)))
         for module in (product_answer, product_discovery):
             stack.enter_context(patch.object(module, "execute_tool", tool_wrapper(module.execute_tool)))
-        for module, name in ((company_answer, "search_for_role"),
-                             (product_discovery, "fetch_product_points")):
+        for module, name, authorize_name in (
+            (company_answer, "search_for_role", "select_authorized_points"),
+            (product_discovery, "fetch_product_points", "authorized_points"),
+        ):
             stack.enter_context(patch.object(module, name, search_wrapper(getattr(module, name))))
-            stack.enter_context(patch.object(module, "authorized_points",
-                                             authorization_wrapper(module.authorized_points)))
+            stack.enter_context(patch.object(module, authorize_name,
+                                             authorization_wrapper(getattr(module, authorize_name))))
         yield observation

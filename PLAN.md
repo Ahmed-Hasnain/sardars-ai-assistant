@@ -314,12 +314,14 @@ Phase 11 evaluation work completed for the English internal prototype on 2026-10
 
 Goal: improve quality, latency, concurrency, and resource use where data shows a problem.
 
-- [ ] Consider reranking, hybrid keyword/vector retrieval for exact terms, dynamic top-K, deduplication, and contextual compression.
-- [ ] Trim or summarize conversation context only when needed; set explicit per-request context and response budgets.
-- [ ] Consider embedding/result caching, prompt caching, Redis, batching, and model routing only with measured value and clear invalidation rules.
-- [ ] Track GPU compute, VRAM/KV-cache use, queueing, and cost of self-hosted inference.
+- [x] Evaluate retrieval options: adopt bounded 32-to-eight, authorization-first lexical reranking for specific subjects; retain the existing profile hint and broad-discovery semantic order. Defer a new hybrid index, extra deduplication and contextual compression until the remaining failures justify their complexity.
+- [x] Review context and response budgets: the existing eight-message/1,600-character history, three-excerpt/1,800-character RAG evidence and 256-token output caps remain appropriate for the measured internal cases; no summarizer is needed yet.
+- [x] Assess caching, batching and model routing: use a measured, bounded five-minute chat-model residency; retain current two-chunk embedding batches and deterministic routing. Defer answer/embedding caches, Redis and further routing without repeated-query benefit and safe invalidation rules.
+- [x] Record applicable local inference resources: CPU-only model residency, zero VRAM, a small two-request queueing probe and token/runtime cost proxies. Separate KV-cache use and monetary cost require future deployment telemetry and hosting assumptions.
 
 Exit: each optimization has a measured benefit and does not reduce answer correctness or freshness.
+
+Phase 12 completed for the English internal prototype on 2026-10-18. Against the retained Phase 11 full-site baseline, the same 40-case suite improved from **31/40** to **34/40** and expected-source hits from **18/24** to **21/24**, with no previously passing case regressing. The 26-case chat gate and seven-case seed suite remained fully passing. The local model reload probe measured roughly three seconds of avoidable loading for warm repeated calls at a cost of about 1.02 GB resident RAM; final serial full-site median/p95 were **2,965.8/12,641.5 ms**. The six remaining full-corpus failures and production-scale concurrency/cost questions remain open; Phase 12 does not clear the deferred Phase 5 backlog. See `docs/phase12_optimization_report.md` for evidence, limits and reproducible checks.
 
 ## Phase 13 — Production deployment
 

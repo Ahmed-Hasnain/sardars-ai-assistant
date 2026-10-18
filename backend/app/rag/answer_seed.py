@@ -18,7 +18,7 @@ from app.rag.claim_safety import UNVERIFIED_BUSINESS_FACT, unsafe_descriptive_cl
 from app.llm.base import ChatMessage, ChatModel
 from app.llm.ollama import OllamaChatModel
 from app.retrieval.search_seed import is_company_identity_question, is_company_overview_question, search_approved
-from app.retrieval.authorization import authorized_points
+from app.retrieval.selection import select_authorized_points
 from app.retrieval.limits import CANDIDATE_LIMIT
 
 
@@ -523,7 +523,7 @@ async def main() -> None:
 
     points = await asyncio.to_thread(search_approved, question)
     with SessionLocal() as db:
-        points = authorized_points(db, "staff", points)
+        points = select_authorized_points(db, "staff", question, points)
     result = await answer_from_points(question, points, OllamaChatModel(Settings()))
     print(result.text)
     if result.sources:

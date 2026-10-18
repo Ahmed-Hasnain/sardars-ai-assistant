@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:0.6b"
     ollama_timeout_seconds: float = 120.0
     ollama_keep_alive: int = 0
+    ollama_chat_keep_alive: int = Field(default=300, ge=0, le=600)
     answer_timeout_seconds: float = Field(default=90.0, ge=5, le=180)
     conversation_retention_days: int = Field(default=30, ge=1, le=365)
 

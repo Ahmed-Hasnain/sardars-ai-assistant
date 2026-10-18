@@ -28,6 +28,7 @@ from app.rag.answer_seed import CitedAnswer, answer_from_points
 from app.rag.routing import route_question
 from app.retrieval.authorization import authorized_points
 from app.retrieval.search_seed import search_for_role
+from app.retrieval.selection import select_authorized_points
 
 CASES_PATH = Path(__file__).with_name("coverage_cases.json")
 CONTROL_URL = "https://sardarandco.com/pages/evaluation-control"
@@ -116,7 +117,7 @@ async def evaluate(case: Case, model, search=search_for_role, sessions=SessionLo
         else:
             candidates = await asyncio.to_thread(search, case.question, case.role)
             with sessions() as db:
-                points = authorized_points(db, case.role, candidates)
+                points = select_authorized_points(db, case.role, case.question, candidates)
         retrieval_ms = (time.monotonic() - started) * 1000
         hit = case.expected_source in {point["payload"].get("url") for point in points} if case.expected_source else None
         result = await answer_from_points(case.question, points, model)
