@@ -2,6 +2,8 @@
 
 A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. This monorepo contains the FastAPI backend and a React/Vite/TypeScript frontend. The backend provides PostgreSQL-backed conversations, revocable internal login, local-model chat through Ollama, and authorized Qdrant retrieval.
 
+The original prototype roadmap through Phase 12 is recorded in [PLAN.md](PLAN.md). Current work follows [EXTENDED_PLAN.md](EXTENDED_PLAN.md); verified behavior and open limitations are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Local full-stack containerization is next. Production deployment is deferred.
+
 ## Local setup
 
 Requires Python 3.12+ and Docker Compose. Local chat also requires Ollama. Run commands from the project root.
@@ -36,7 +38,7 @@ Run the frontend in a second terminal (Node.js 20.19+ or 22.12+):
 
 Open http://127.0.0.1:5173 and sign in with an existing admin or staff account. Vite proxies `/api` to the local FastAPI server on port 8000; the browser does not need a separate CORS allowance. The frontend supports sign-in, new and follow-up chats, safe Markdown, returned citations, retry after an API error, and a sidebar of owned conversations. The list shows a short preview of each conversation's first question. Open one to read its latest 50 messages and load older pages; earlier answers are marked as historical because business facts may have changed. Historical citations are reconstructed only while each source is currently active, indexed and visible to your role. Uploaded source links download through the authenticated API. Answer text may link only to URLs in its returned citations.
 
-The browser keeps the bearer token and active conversation ID in this tab's `sessionStorage` so refresh can restore the chat. On startup, the frontend checks the token with `/auth/me` before showing any saved conversation; logout or HTTP 401 clears it. Closing the tab ends this browser-side session, and the backend still enforces its eight-hour token expiry and role/source visibility. Browser storage is accessible to JavaScript, so a later production authentication design should use an HTTP-only cookie and its CSRF controls. The browser uses `POST /api/v1/chat/stream` for SSE delivery. The API authenticates, checks and saves the whole answer before sending any text, so it cannot leak an unverified intermediate company claim; the first chunk arrives after generation finishes. `POST /api/v1/chat` remains a JSON option. Production static hosting is Phase 13 work: serve `frontend/dist/` and reverse-proxy `/api` to FastAPI on the same origin.
+The browser keeps the bearer token and active conversation ID in this tab's `sessionStorage` so refresh can restore the chat. On startup, the frontend checks the token with `/auth/me` before showing any saved conversation; logout or HTTP 401 clears it. Closing the tab ends this browser-side session, and the backend still enforces its eight-hour token expiry and role/source visibility. Browser storage is accessible to JavaScript, so a later production authentication design should use an HTTP-only cookie and its CSRF controls. The browser uses `POST /api/v1/chat/stream` for SSE delivery. The API authenticates, checks and saves the whole answer before sending any text, so it cannot leak an unverified intermediate company claim; the first chunk arrives after generation finishes. `POST /api/v1/chat` remains a JSON option. Production static hosting is deferred to E9; a local containerized frontend is planned in E1.
 
 Frontend checks:
 

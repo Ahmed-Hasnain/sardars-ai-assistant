@@ -1,6 +1,7 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-18
+Last reviewed: 2026-10-19
+Status: original English internal-prototype roadmap complete through Phase 12; unfinished Phase 13 and deferred follow-ups transferred to `EXTENDED_PLAN.md`
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -24,7 +25,7 @@ Engineering standards for every phase: use type hints, Pydantic v2 schemas, clea
 
 ## Implementation tracking
 
-`IMPLEMENTATION_STATUS.md` is the record of current behavior, phase status, completed major features, and verification evidence. This file defines the roadmap and acceptance criteria. Its checkboxes describe individual planned tasks; update them when a major feature or phase is formally verified, not after every small change. If status text here and the implementation status file disagree, inspect the code and use `IMPLEMENTATION_STATUS.md` as the current-status record.
+`IMPLEMENTATION_STATUS.md` is the record of current behavior, phase status, completed major features, and verification evidence. This file records the original roadmap and acceptance criteria through Phase 12. Current work follows `EXTENDED_PLAN.md`, which carries the uncompleted deployment and follow-up items. If status text here and the implementation status file disagree, inspect the code and use `IMPLEMENTATION_STATUS.md` as the current-status record.
 
 ## Decisions to settle before they affect implementation
 
@@ -323,18 +324,9 @@ Exit: each optimization has a measured benefit and does not reduce answer correc
 
 Phase 12 completed for the English internal prototype on 2026-10-18. Against the retained Phase 11 full-site baseline, the same 40-case suite improved from **31/40** to **34/40** and expected-source hits from **18/24** to **21/24**, with no previously passing case regressing. The 26-case chat gate and seven-case seed suite remained fully passing. The local model reload probe measured roughly three seconds of avoidable loading for warm repeated calls at a cost of about 1.02 GB resident RAM; final serial full-site median/p95 were **2,965.8/12,641.5 ms**. The six remaining full-corpus failures and production-scale concurrency/cost questions remain open; Phase 12 does not clear the deferred Phase 5 backlog. See `docs/phase12_optimization_report.md` for evidence, limits and reproducible checks.
 
-## Phase 13 — Production deployment
+## Phase 13 — Transferred, not completed
 
-Goal: a secure, observable deployment that can be operated and recovered.
-
-- [ ] Verify Ollama-to-vLLM adapter behavior with the selected model, tool format, streaming, and load profile.
-- [ ] Containerize services appropriately; keep PostgreSQL, Qdrant, and inference private behind the application network.
-- [ ] Add reverse proxy, HTTPS, internal-user authentication/authorization, rate limiting, secret handling, and environment-specific configuration; do not expose the first release to public customers.
-- [ ] Plan GPU capacity, concurrency, request queues, timeouts, backups, database/vector persistence, restore tests, logging, monitoring, and alerts.
-- [ ] Use S3-compatible document storage only if deployment/storage needs justify it.
-- [ ] Run deployment smoke tests and failure/recovery drills; document operations and rollback.
-
-Exit: the service is accessible to its intended users, private services are protected, data can be restored, and failures can be diagnosed.
+Production deployment is not currently planned. Its local containerization portion and later production-readiness requirements are now sequenced in `EXTENDED_PLAN.md` (E1 and E9). The original roadmap is complete **for its English internal-prototype scope through Phase 12 only**; this transfer is not a production-readiness claim.
 
 ## API, security, and observability conventions
 
@@ -351,14 +343,7 @@ Capture structured logs/metrics for request and conversation IDs, model/embeddin
 - Add multi-company configuration after Sardars has proven the shared boundaries; do not hardcode core infrastructure to one brand, but do not build tenancy before it is needed.
 - Add Redis, rerankers, advanced orchestration, S3, or broader deployment infrastructure only when evidence justifies them.
 
-## Deferred follow-up backlog — revisit after the current roadmap
+## Deferred follow-up backlog — transferred, not completed
 
-These are requested future decisions and features, not work already implemented or permission to clear existing data. Revisit their order after Phase 11 establishes a quality and latency baseline; keep the current internal authorization, source visibility, bounded tools, and PostgreSQL authority for exact/current product facts while evaluating alternatives.
-
-1. [ ] **Close the Phase 5 full-corpus retrieval regressions.** Reproduce the saved-crawl and seed failures, classify each by extraction, coverage, ranking, evidence selection, or answer generation, then rerun the same evaluations. Record before/after relevance, citation and abstention results; do not treat a different authorized citation as the same failure as missing evidence or a service error.
-2. [ ] **Decide whether ingestion needs a background worker.** Measure request duration, queueing, failed-job recovery and resource use for uploads and sitemap imports. Compare the current durable-job synchronous runner with a small dedicated worker and with Celery plus a broker. Choose Celery only if its scheduling, retry, concurrency and operational costs are justified. Preserve job ownership, leases, idempotency, status/progress, bounded retries and safe publication across PostgreSQL and Qdrant.
-3. [ ] **Evaluate model-assisted tool choice after bounded RAG retrieval.** Compare today's inspectable query routing and direct PostgreSQL calls with a flow that retrieves a small authorized evidence set, gives the model only that set and an explicit allowlist of tools, then lets it request a tool call. Do not send the full corpus. Measure tool-choice accuracy, unsupported-claim rate, latency and cost on realistic questions, including questions with no trigger keywords. The application must still validate calls, enforce roles, recheck sources and read current SKU/price values from PostgreSQL; the model cannot grant itself access or decide that a stale page is authoritative.
-4. [ ] **Design and complete a fresh-account-to-ingestion user journey.** Decide whether “anyone can register” means open account creation with staff approval, invitation-only staff signup, or a separate unprivileged pending role. A new account must not self-assign admin/staff privileges. Both approved admins and staff should be able to upload PDFs/files and submit allowed URLs or sitemaps; define whether each source is private to the submitter, shared with staff, or admin-only. Add the signup and upload/sitemap UI once those rules are set. For the proposed fresh-start exercise, inventory and back up the current RAG source/job/snapshot tables, stored originals and Qdrant collection, specify exactly which data will be cleared, and run a reversible reset procedure before ingesting the new account's PDF/TXT/Markdown files and sitemap. Preserve users, conversations and the authoritative product tables unless the reset plan explicitly includes them. Extend the existing bounded single-URL import into an authenticated sitemap crawl with domain/robots/size/page limits. Stage crawl records and content references durably before enqueueing indexing work, preserving source provenance; store large originals outside PostgreSQL if appropriate. Expose job progress, retries and update/deletion behavior. Decide supported DOCX/OCR formats separately. The chosen worker should extract, chunk, embed and publish sources; verify that the new account can retrieve only authorized indexed content and that failures do not publish partial or invisible data.
-5. [ ] **Add a bounded internet-search tool.** Choose a self-hosted or approved search provider and define network/privacy limits, timeouts, result count, domain safety, caching and citation provenance. Treat search results as untrusted, distinguish them from authorized Sardars sources, and never use them alone to assert current Sardars price, stock, policy or other controlled facts. Test authorization, injection, unavailable results and answer citations.
-6. [ ] **Run a live end-to-end acceptance pass for the new flow.** Use a disposable account and controlled documents/sitemap to test signup or approval, upload, job progress, indexed retrieval, source revocation, failed-job recovery, browser refresh, and cleanup across PostgreSQL, stored originals and Qdrant. Record what remains after the test and compare its answer quality with the Phase 11 baseline.
+The original backlog is now sequenced in `EXTENDED_PLAN.md`: ingestion runner (E3), fresh-account ingestion (E4), full-corpus retrieval (E5), model-assisted tool choice (E6), internet search (E7), and live end-to-end acceptance (E8). No data was cleared and none of these items is marked complete by the roadmap transfer.
 
