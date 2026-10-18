@@ -1,6 +1,6 @@
 # Instructions for AI agents working on Sardars AI Assistant
 
-This file applies to the whole repository. Read `README.md`, `PLAN.md`, and `IMPLEMENTATION_STATUS.md` before making a significant change. `PLAN.md` contains the roadmap, acceptance criteria, and open decisions. `IMPLEMENTATION_STATUS.md` records the current implementation and verified major features. Inspect the actual code and Git state as well; documentation may lag behind the working tree. Follow the user's current request when it changes the scope or working method.
+This file applies to the whole repository. Read `README.md`, `PLAN.md`, `EXTENDED_PLAN.md`, and `IMPLEMENTATION_STATUS.md` before making a significant change. `PLAN.md` records the original prototype roadmap and decisions through Phase 12; `EXTENDED_PLAN.md` is the current roadmap and acceptance criteria. `IMPLEMENTATION_STATUS.md` records the current implementation and verified major features. Inspect the actual code and Git state as well; documentation may lag behind the working tree. Follow the user's current request when it changes the scope or working method.
 
 ## How to work with the developer
 
@@ -8,7 +8,7 @@ This file applies to the whole repository. Read `README.md`, `PLAN.md`, and `IMP
 - Work phase by phase in small, runnable checkpoints. Do not create the entire future architecture as empty scaffolding.
 - The developer usually wants to build components themselves. When asked for guidance, give clear commands in manageable batches (about five or six when requested), explain unfamiliar commands, state what result to expect, and inspect the outcome before the next batch. When explicitly asked to create, fix, or run something, carry out that request and verify it.
 - Make routine implementation choices using the existing plan and code. Raise an unresolved product or data decision when it materially affects the next implementation step.
-- After a major feature is complete and verified, update `IMPLEMENTATION_STATUS.md` with the behavior, evidence, limitations, and phase status. Do not update it for every small change. Update `PLAN.md` when the roadmap or acceptance criteria change, or a phase is formally completed. Never mark a phase complete because files merely exist.
+- After a major feature is complete and verified, update `IMPLEMENTATION_STATUS.md` with the behavior, evidence, limitations, and phase status. Do not update it for every small change. Update `EXTENDED_PLAN.md` when the current roadmap or acceptance criteria change, or an extended checkpoint is formally completed. Keep `PLAN.md` as the historical prototype roadmap. Never mark a phase complete because files merely exist.
 - Describe what changed, why, how it was checked, and any material limitation. Do not claim behavior was tested if it was not.
 
 ## Product and architecture rules
@@ -36,7 +36,7 @@ This file applies to the whole repository. Read `README.md`, `PLAN.md`, and `IMP
 
 ## Implementation standards
 
-- Follow the current phase in `PLAN.md`. Start with the simplest working implementation and add complexity in response to a demonstrated need.
+- Follow the current checkpoint in `EXTENDED_PLAN.md`. Start with the simplest working implementation and add complexity in response to a demonstrated need.
 - Use Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy, Alembic, and PostgreSQL for the backend unless a change has a clear reason. Use Qdrant for semantic retrieval when that phase begins.
 - Use type hints, clear names, configuration from environment, useful exceptions, and async code where appropriate. Keep HTTP routes thin and separate service/repository concerns when that improves clarity.
 - Keep files and functions focused. Avoid duplicated logic, magic constants, premature abstractions, opaque orchestration frameworks, and unrelated rewrites.
