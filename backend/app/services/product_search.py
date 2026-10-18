@@ -39,6 +39,8 @@ STOP = frozenset({
 })
 BROAD_BROWSE = re.compile(r"\b(?:products|catalog|catalogue|items)\b", re.I)
 FINISH_TERMS = frozenset({"black", "white", "chrome", "gold", "silver", "gunmetal", "bronze", "copper"})
+OUT_OF_STOCK = re.compile(r"\b(?:out of stock|sold out)\b", re.I)
+IN_STOCK = re.compile(r"\b(?:in stock|with stock|have stock|on hand)\b", re.I)
 PRODUCT_TYPE_TERMS = frozenset({"basin", "mixer", "shower", "bath", "toilet", "sink", "faucet", "tap", "tile", "vanity"})
 
 
@@ -77,7 +79,8 @@ def _price_filter(question: str) -> tuple[Decimal | None, Decimal | None, str | 
 
 
 def _terms(question: str) -> list[str]:
-    without_price = PRICE_BETWEEN.sub(" ", PRICE_LIMIT.sub(" ", question))
+    without_price = OUT_OF_STOCK.sub(" ", IN_STOCK.sub(" ",
+        PRICE_BETWEEN.sub(" ", PRICE_LIMIT.sub(" ", question))))
     return list(dict.fromkeys(
         word
         for word in TOKEN.findall(without_price.casefold().replace("-", " "))
@@ -162,6 +165,7 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
     if not allowed:
         return empty()
     minimum, maximum, currency, min_inclusive, max_inclusive = _price_filter(args.question)
+    stock_filter = "zero" if OUT_OF_STOCK.search(args.question) else "positive" if IN_STOCK.search(args.question) else None
     context = list(dict.fromkeys(args.context_handles))
     if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", handle) for handle in context):
         return empty()
@@ -252,6 +256,10 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
             priced.source_row_kind == "variant", priced.variant_sku.is_not(None),
             priced.variant_price.is_not(None),
         ]
+        if stock_filter == "positive":
+            price_conditions.append(priced.variant_inventory_qty > 0)
+        elif stock_filter == "zero":
+            price_conditions.append(priced.variant_inventory_qty == 0)
         if minimum is not None:
             price_conditions.append(priced.variant_price >= minimum if min_inclusive else priced.variant_price > minimum)
         if maximum is not None:
@@ -296,6 +304,7 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
             rows = db.execute(select(
                 Product.handle, Product.title, Product.vendor, Product.variant_sku,
                 Product.variant_price, Product.snapshot_currency, Product.source_file_sha256,
+                Product.variant_inventory_qty,
                 Product.option1_name, Product.option1_value, Product.option2_name,
                 Product.option2_value, Product.option3_name, Product.option3_value,
             ).where(
@@ -328,7 +337,10 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
                         (currency is None or row.snapshot_currency == currency)
                         and (minimum is None or (row.variant_price >= minimum if min_inclusive else row.variant_price > minimum))
                         and (maximum is None or (row.variant_price <= maximum if max_inclusive else row.variant_price < maximum))
-                        and _variant_has_finish(row)]
+                        and _variant_has_finish(row)
+                        and (stock_filter is None
+                             or (row.variant_inventory_qty is not None and
+                                 (row.variant_inventory_qty > 0 if stock_filter == "positive" else row.variant_inventory_qty == 0)))]
             if handle in exact_skus:
                 eligible = [row for row in eligible if row.variant_sku.casefold() in exact_skus[handle]]
             if not eligible:
@@ -346,6 +358,7 @@ def search_products(db: Session, role: str, args: ProductSearchArguments) -> Pro
                 results.append(ProductSearchMatch(
                     handle=handle, title=title, vendor=vendor, sku=sku,
                     price=format(chosen.variant_price.normalize(), "f"), currency=chosen.snapshot_currency,
+                    stock_quantity=chosen.variant_inventory_qty,
                     source_file_sha256=chosen.source_file_sha256,
                     variant_count=1 if handle in exact_skus else len(eligible),
                     specifications=_specifications(chosen, identity),

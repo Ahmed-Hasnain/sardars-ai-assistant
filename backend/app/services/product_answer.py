@@ -12,7 +12,9 @@ from app.schemas.chat import ChatResponse, ProductSource
 from app.tools.registry import execute_tool
 from app.tools.schemas import ProductCandidates, ProductDetails, ToolInvocation, ToolSuccess
 
-PRODUCT_INTENT = re.compile(r"\b(?:sku|price|prices|pricing|variant|variants|product details|product handle|cost|how much)\b", re.I)
+STOCK_INTENT = re.compile(r"\b(?:stock|inventory|availability|available|in.stock|units left|on hand)\b", re.I)
+STOCK_PROMISE = re.compile(r"\b(?:guarantee|reserve|promise|definitely)\b", re.I)
+PRODUCT_INTENT = re.compile(r"\b(?:sku|price|prices|pricing|variant|variants|product details|product handle|cost|how much|stock|inventory|availability|available)\b", re.I)
 NO_PRODUCT = "I couldn't find a matching product in the current database. Provide a SKU, product handle, or more of the product name."
 
 
@@ -20,7 +22,7 @@ def _render_product(data: ProductDetails) -> str:
     lines = [f"{data.title or data.handle} (handle: {data.handle})"]
     if data.vendor:
         lines.append(f"Vendor: {data.vendor}")
-    lines.append("Current prices and SKUs in the Sardars product database:")
+    lines.append("Prices, SKUs and variant stock quantities in the Sardars product database:")
     for variant in data.variants:
         options = ", ".join(
             f"{name}: {value}" for name, value in (
@@ -30,10 +32,12 @@ def _render_product(data: ProductDetails) -> str:
             ) if name and value
         )
         suffix = f" ({options})" if options else ""
-        lines.append(f"SKU {variant.sku or 'unknown'}{suffix}: price {variant.price} (currency not recorded)")
+        stock = (f"database stock {variant.stock_quantity} units"
+                 if variant.stock_quantity is not None else "database stock not recorded")
+        lines.append(f"SKU {variant.sku or 'unknown'}{suffix}: price {variant.price} (currency not recorded); {stock}")
         if variant.row_kind == "image_only":
             lines.append("This SKU is on an image-only CSV row, not a product variant.")
-    lines.append("Values were read from PostgreSQL at request time. External Shopify/ERP sync and stock are unverified.")
+    lines.append("Values were read from PostgreSQL at request time. Stock can change after this read; reservations and external Shopify/ERP sync are unverified.")
     return "\n".join(lines)
 
 
@@ -61,7 +65,8 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
         elif result.error.code == "too_many_variants":
             answer = "This product has too many variants for one answer. Please ask about a specific SKU."
         else:
-            answer = NO_PRODUCT
+            answer = ("I can't guarantee stock availability. Provide a SKU, product handle, or clearer product name to check the current database quantity."
+                      if STOCK_INTENT.search(question) and STOCK_PROMISE.search(question) else NO_PRODUCT)
         return ChatResponse(answer=answer, route="product", model=None)
     if isinstance(result.data, ProductCandidates):
         if any(contains_prompt_instruction(item.title or "") or unsafe_catalog_display(item.title or "")
@@ -81,7 +86,9 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
         ))
     if (any(contains_prompt_instruction(value) or unsafe_catalog_display(value)
             for value in display_fields)
-        or any(not re.fullmatch(r"\d+(?:\.\d+)?", variant.price) for variant in data.variants)):
+        or any(not re.fullmatch(r"\d+(?:\.\d+)?", variant.price)
+               or (variant.stock_quantity is not None and variant.stock_quantity < 0)
+               for variant in data.variants)):
         return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
     source = ProductSource(
         source_file_sha256=data.source_file_sha256,
@@ -89,6 +96,7 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
         source_exported_at=data.source_exported_at,
         imported_at=data.imported_at,
         currency=data.currency,
+        current_stock_verified=data.inventory_verified,
     )
     return ChatResponse(answer=_render_product(data), route="product", model=None,
                         company_data_verified=True, product_source=source,

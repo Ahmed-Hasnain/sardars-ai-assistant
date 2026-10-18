@@ -23,6 +23,8 @@ from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.company_answer import answer_company
 from app.services.product_answer import PRODUCT_INTENT, answer_product
+from app.services.product_answer import STOCK_INTENT, STOCK_PROMISE
+from app.services.product_lookup import EXPLICIT_SKU
 from app.services.product_discovery import answer_product_discovery
 from app.services.conversations import (
     ConversationConflict, ConversationNotFound, TurnContext, company_search_query,
@@ -127,6 +129,13 @@ async def _answer_chat(
             "unsafe": "I can't disclose private information or change my access rules.",
         }
         return ChatResponse(answer=replies[scope], route="out_of_scope", model=None)
+    if scope == "company" and STOCK_INTENT.search(request.message) and (
+        EXPLICIT_SKU.search(request.message) or STOCK_PROMISE.search(request.message)
+    ):
+        try:
+            return await asyncio.wait_for(answer_product(request.message, user, db), timeout=10)
+        except asyncio.TimeoutError:
+            return ChatResponse(answer="Product lookup timed out.", route="product", model=None)
     if scope == "company" and (request.product_handles or DISCOVERY_INTENT.search(request.message)):
         try:
             discovery = await asyncio.wait_for(

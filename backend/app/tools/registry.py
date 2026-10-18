@@ -41,14 +41,14 @@ TOOLS: Mapping[str, ReadTool] = MappingProxyType({
     ),
     "get_product_details": ReadTool(
         "get_product_details",
-        "Read developer-authorized current prices and SKUs from PostgreSQL by exact SKU, handle, or product question. "
-        "Currency and external synchronization status are unknown; stock is not verified.",
+        "Read developer-authorized prices, SKUs and variant stock quantities from PostgreSQL by exact SKU, handle, or product question. "
+        "Currency, reservations and external synchronization status are unknown.",
         frozenset({"staff", "admin"}),
     ),
     "search_products": ReadTool(
         "search_products",
         "Search visible PostgreSQL products by brand, category, finish, price and exact identifiers. "
-        "Returns bounded exact prices and SKUs. Currency and stock are unverified unless recorded.",
+        "Returns bounded exact prices, SKUs and variant stock quantities. Currency and external synchronization remain unverified.",
         frozenset({"staff", "admin"}),
     ),
 })

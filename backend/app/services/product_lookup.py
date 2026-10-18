@@ -58,7 +58,8 @@ def _columns():
         Product.handle, Product.title, Product.vendor, Product.variant_sku,
         Product.option1_name, Product.option1_value, Product.option2_name,
         Product.option2_value, Product.option3_name, Product.option3_value,
-        Product.variant_price, Product.source_row_kind, Product.source_row_number,
+        Product.variant_price, Product.variant_inventory_qty,
+        Product.source_row_kind, Product.source_row_number,
         Product.source_file_sha256, Product.source_exported_at, Product.imported_at,
         Product.snapshot_currency,
     )
@@ -83,6 +84,7 @@ def _details(db: Session, allowed: set[str], rows: list, match: str) -> ProductD
         option2_name=_display(row.option2_name), option2_value=_display(row.option2_value),
         option3_name=_display(row.option3_name), option3_value=_display(row.option3_value),
         price=format(row.variant_price.normalize(), "f"),
+        stock_quantity=row.variant_inventory_qty if row.source_row_kind == "variant" else None,
     ) for row in rows]
     return ProductDetails(
         observed_at=datetime.now(timezone.utc), query_match=match,
@@ -90,6 +92,8 @@ def _details(db: Session, allowed: set[str], rows: list, match: str) -> ProductD
         source_file_sha256=first.source_file_sha256,
         source_exported_at=_utc(first.source_exported_at),
         imported_at=_utc(first.imported_at), currency=first.snapshot_currency,
+        inventory_verified=all(variant.row_kind == "variant" and variant.stock_quantity is not None
+                               for variant in variants),
         variants=variants,
     )
 
