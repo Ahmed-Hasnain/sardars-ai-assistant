@@ -56,6 +56,7 @@ class ProductVariant(StrictModel):
     option3_name: str | None = Field(max_length=200)
     option3_value: str | None = Field(max_length=200)
     price: str = Field(max_length=80)
+    stock_quantity: int | None = Field(default=None, ge=0)
 
 
 class ProductDetails(StrictModel):
@@ -72,7 +73,7 @@ class ProductDetails(StrictModel):
     database_values_verified: Literal[True] = True
     current_price_verified: Literal[True] = True
     external_sync_verified: Literal[False] = False
-    inventory_verified: Literal[False] = False
+    inventory_verified: bool = False
     variants: list[ProductVariant] = Field(min_length=1, max_length=32)
 
 
@@ -100,6 +101,7 @@ class ProductSearchMatch(StrictModel):
     vendor: str | None = Field(max_length=200)
     sku: str = Field(max_length=200)
     price: str = Field(max_length=80)
+    stock_quantity: int | None = Field(default=None, ge=0)
     currency: str | None = Field(max_length=3)
     source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     variant_count: int = Field(ge=1)

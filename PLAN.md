@@ -33,8 +33,8 @@ These questions do not block the remaining Phase 1 work. Record the chosen answe
 | Decision | Why it matters | Current state |
 | --- | --- | --- |
 | First audience: public customers, staff, or both | Determines authentication, permitted sources, and feature scope | Admins and internal staff only for the first release (changed 2026-10-13); public customer access deferred. Local admin/staff login is implemented. Both roles may access the approved public-site seed; admins can list account metadata. Phase 5 Step 4 adds authenticated ingestion with public/staff/admin source visibility; actual broader internal company documents still need importing/evaluation. |
-| First 10–20 user questions and success criteria | Defines the first useful AI slice and evaluation set | Open |
-| Product catalogue, price, and stock authority | Determines which structured facts the assistant may report and what synchronization is needed | For internal Phase 6 answers, the developer designated current values in `public.products` as valid on 2026-10-16. The app verifies the values at PostgreSQL query time. Shopify/ERP synchronization, external IDs, currency, stock, and freshness remain open; do not claim external-system authority. |
+| First 10–20 user questions and success criteria | Defines the first useful AI slice and evaluation set | An English internal-prototype suite of 26 cross-route cases plus the retained 40-case full-site and seven-case seed suites is recorded in Phase 11. Provisional engineering gates are in `docs/phase11_evaluation_completion.md`; business acceptance and additional languages remain open. |
+| Product catalogue, price, and stock authority | Determines which structured facts the assistant may report and what synchronization is needed | For the internal proof of concept, the developer designated price/SKU values in `public.products` as valid on 2026-10-16 and populated variant stock quantities on 2026-10-18, explicitly accepting those values as valid. The app reads them from PostgreSQL at request time. Shopify/ERP synchronization, external IDs, currency, stock reservations/location, sellable availability and external freshness remain open; do not claim external-system authority. |
 | Source approval for the internal release | Determines which material may enter internal retrieval | On 2026-10-13 the project owner approved the supplied Sardars sitemap/site links and pasted company profile, and chose source-level approval for future files, documents, and URLs supplied or registered by authorized admins/staff. Do not require per-document manual review for the first release. The developer has no staff-only documents yet; see `data/source_inventory.md`. |
 | Local CPU, RAM, GPU, and VRAM | Determines model size, quantization, and expected latency | Observed 2026-10-12: Ryzen 3 3250U (2 cores/4 threads), 13 GiB RAM with about 2.6 GiB available and 3.2 GiB swap used, integrated Radeon Vega, no NVIDIA GPU; start with a small CPU model and measure latency |
 | Required languages: English, Urdu, Roman Urdu | Determines model and retrieval evaluation | Open |
@@ -301,12 +301,14 @@ Phase 10 completed for the internal prototype on 2026-10-18. React/Vite/TypeScri
 
 Goal: measure the complete assistant rather than judging it by casual chats.
 
-- [ ] Expand realistic cases for company info, brands, discovery, exact product facts, prices, availability, technical questions, comparisons, RAG, tools, combined flows, irrelevant questions, injection, and unavailable information.
-- [ ] Measure retrieval relevance/coverage, answer correctness, support for claims, hallucinations, tool selection, permission handling, refusal quality, latency, and token/context use separately.
-- [ ] Inspect failures at the correct layer: source data, extraction, chunking, retrieval, routing, tools, prompt, model, or UI.
-- [ ] Record baselines and acceptance thresholds before tuning.
+- [x] Expand realistic cases for company info, brands, discovery, exact product facts, prices, availability, technical questions, comparisons, RAG, tools, combined flows, irrelevant questions, injection, and unavailable information.
+- [x] Measure retrieval relevance/coverage, answer correctness, support for claims, hallucinations, tool selection, permission handling, refusal quality, latency, and token/context use separately.
+- [x] Inspect failures at the correct layer: source data, extraction, chunking, retrieval, routing, tools, prompt, model, or UI.
+- [x] Record baselines and acceptance thresholds before tuning.
 
 Exit: an evaluation run is repeatable and shows whether a change improved or harmed the assistant.
+
+Phase 11 evaluation work completed for the English internal prototype on 2026-10-18. The pre-stock baseline, stock-aware 26-case suite, comparator, full-site/seed rechecks, isolated authenticated stock API tests, and provisional engineering gates are recorded in `docs/phase11_evaluation_completion.md`. The initial stock-aware pair passed 23/26 with stable failures. A later targeted quality checkpoint passed the stricter 26-case gate twice with matching case/evaluator/database fingerprints. This is a measured pass for that bounded suite, not universal answer quality: the wider full-site regression suite still has open failures, semantic checks are limited proxies, the browser smoke is mocked, and production/business thresholds and multilingual evaluation remain open. The deferred Phase 5 full-corpus retrieval regression work is not cleared or folded into this phase. Phase 12 can begin with the recorded baseline and remaining failures.
 
 ## Phase 12 — Optimization after measurement
 

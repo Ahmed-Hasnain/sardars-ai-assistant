@@ -8,6 +8,8 @@ Updated scope, 2026-10-16: the developer has a Sardars Shopify product CSV and c
 
 Sardars has an ERP and a website. The developer currently has no ERP access and will ask the company for it. ERP identity, supported interfaces and ERP-to-website synchronization are unknown. The existing website crawl supplies dated descriptive evidence; it does not establish current prices or inventory. The application's PostgreSQL tables hold authentication, permissions, sources, ingestion jobs and the imported Shopify file snapshot. The snapshot is not a live authoritative ERP catalogue.
 
+Internal proof-of-concept update (2026-10-18): the developer populated `public.products.variant_inventory_qty` and designated those stored quantities as valid alongside the previously authorized prices/SKUs. The assistant now reports the role-visible PostgreSQL variant quantity with a query-time observation timestamp, including zero. This authorization applies to the local database snapshot, not to ERP synchronization, reservations, inventory location, or guaranteed sellable availability. The original ERP questions below remain open.
+
 The current `ChatModel.chat()` interface returns text only. The first application tool checkpoint now implements an explicit read-tool registry and authenticated single execution for `get_source_status`, backed by existing PostgreSQL source records. Model tool requests, an execution loop and ERP read tools are not implemented. ERP source discovery remains open.
 
 ## Verified first checkpoint: source-status read tool

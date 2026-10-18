@@ -156,7 +156,9 @@ def test_pdf_role_spoofing_is_not_passed_to_model_or_cited():
     result = asyncio.run(answer_from_points("Which brands does Sardars mention?", [point], model))
     assert result.sources and result.sources[0].url == url
     assert "Bongio" in result.text and "password" not in result.text
-    assert "password" not in model.chat.await_args.args[0][1]["content"]
+    # The explicit safe brand sentence is now rendered directly, so the
+    # instruction-bearing PDF chunk never reaches a model prompt at all.
+    model.chat.assert_not_called()
 
 
 def test_page_role_spoofing_without_safe_evidence_abstains():
@@ -378,6 +380,21 @@ def test_brand_paraphrase_does_not_use_unapproved_or_unrelated_evidence() -> Non
         "What brands does Sardars offer?", [unapproved, unrelated], model,
     ))
     assert result.text == FALLBACK and result.sources == []
+    model.chat.assert_not_called()
+
+
+def test_which_brands_does_sardars_mention_prefers_its_about_page() -> None:
+    other = _point()
+    other["payload"].update(
+        title="Industry article", url="https://sardarandco.com/blogs/news/brands",
+        source_type="articles", text="Other shops offer brands like Example and Rival.",
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points(
+        "Which brands does Sardars mention?", [other, _point()], model,
+    ))
+    assert result.sources[0].url == ABOUT_URL
+    assert "Bongio" in result.text and "Grohe" in result.text
     model.chat.assert_not_called()
 
 

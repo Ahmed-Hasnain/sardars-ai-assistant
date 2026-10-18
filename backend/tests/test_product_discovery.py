@@ -30,9 +30,10 @@ def catalog():
         db.add_all([
             Product(**common, source_row_number=1, handle="black-basin-mixer", title="Black Wall Mounted Basin Mixer",
                     vendor="Grohe", variant_sku="BASIN-CHROME", variant_price=200,
+                    variant_inventory_qty=0,
                     option1_name="Finish", option1_value="Chrome"),
             Product(**common, source_row_number=2, handle="black-basin-mixer", variant_sku="BASIN-BLACK",
-                    variant_price=900, option1_name="Finish", option1_value="Black"),
+                    variant_price=900, variant_inventory_qty=8, option1_name="Finish", option1_value="Black"),
             Product(**common, source_row_number=3, handle="listed-colors-basin-mixer", title="Wall Mounted Basin Mixer",
                     vendor="Valvex", product_category="Plumbing > Faucets",
                     meta_shopify_color_pattern="black; chrome", variant_sku="BASIN-GENERIC",
@@ -41,7 +42,7 @@ def catalog():
                     vendor="Grohe", variant_sku="SHOWER-BLACK", variant_price=300),
             Product(**(common | {"visibility": "admin"}), source_row_number=5,
                     handle="admin-basin-mixer", title="Black Wall Mounted Basin Mixer Admin",
-                    vendor="Grohe", variant_sku="ADMIN-BLACK", variant_price=400),
+                    vendor="Grohe", variant_sku="ADMIN-BLACK", variant_price=400, variant_inventory_qty=20),
             Product(**(common | {"status": "archived"}), source_row_number=6,
                     handle="archived-basin-mixer", title="Black Wall Mounted Basin Mixer Archived",
                     vendor="Grohe", variant_sku="ARCHIVED-BLACK", variant_price=350),
@@ -92,6 +93,20 @@ def test_filter_requires_same_variant_finish_and_price_with_role_and_status(cata
         assert invoke(db, "Recommend black wall mounted basin mixers between 900 and 1000").data.matches[0].price == "900"
         assert invoke(db, "Recommend black wall mounted basin mixers between 100000000000 and 200000000000").data.matches == []
         assert invoke(db, "Recommend shower mixers under 1000").data.matches[0].handle == "black-shower-mixer"
+
+
+def test_stock_filter_uses_matching_visible_variant_and_rendered_quantity(catalog, monkeypatch):
+    monkeypatch.setattr(product_discovery, "fetch_product_points", lambda *args: [])
+    actor = SimpleNamespace(role="staff", is_active=True)
+    with catalog() as db:
+        positive = invoke(db, "Show black wall mounted basin mixers in stock")
+        zero = invoke(db, "Show basin mixers out of stock")
+        answer = asyncio.run(answer_product_discovery("Show black wall mounted basin mixers in stock", actor, db))
+    assert [(item.sku, item.stock_quantity) for item in positive.data.matches] == [("BASIN-BLACK", 8)]
+    assert [(item.sku, item.stock_quantity) for item in zero.data.matches] == [("BASIN-CHROME", 0)]
+    assert [(item.sku, item.stock_quantity) for item in answer.products] == [("BASIN-BLACK", 8)]
+    assert "database stock 8 units" in answer.answer
+    assert "ADMIN-BLACK" not in answer.answer
 
 
 def test_natural_broad_product_browsing_uses_bounded_visible_catalog(catalog):

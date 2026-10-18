@@ -72,6 +72,7 @@ async def answer_product_discovery(
     if any(
         not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,199}", item.handle)
         or not re.fullmatch(r"\d+(?:\.\d+)?", item.price)
+        or (item.stock_quantity is not None and item.stock_quantity < 0)
         or any(contains_prompt_instruction(value) or unsafe_catalog_display(value) for value in (
             item.title, item.sku, item.vendor or "", *item.specifications.keys(),
             *item.specifications.values(),
@@ -112,7 +113,11 @@ async def answer_product_discovery(
             source_id = citation.source_id
         lines.append(
             f"{match.title} (handle: {match.handle}): lowest qualifying variant SKU {match.sku}, "
-            f"price {match.price} {match.currency or '(currency not recorded)'}."
+            f"price {match.price} {match.currency or '(currency not recorded)'}; "
+            f"database stock {match.stock_quantity} units."
+            if match.stock_quantity is not None else
+            f"{match.title} (handle: {match.handle}): lowest qualifying variant SKU {match.sku}, "
+            f"price {match.price} {match.currency or '(currency not recorded)'}; database stock not recorded."
         )
         if match.specifications:
             lines.append("Catalog-listed specifications: " + ", ".join(
@@ -124,6 +129,7 @@ async def answer_product_discovery(
             lines.append("No verified description is available for this catalog match.")
         products.append(MatchedProduct(
             handle=match.handle, title=match.title, sku=match.sku, price=match.price,
+            stock_quantity=match.stock_quantity,
             currency=match.currency, database_observed_at=data.observed_at,
             source_file_sha256=match.source_file_sha256, variant_count=match.variant_count,
             specifications=match.specifications,
@@ -144,7 +150,7 @@ async def answer_product_discovery(
         lines.append("Some otherwise matching rows lacked the requested currency and were excluded.")
     if not sources:
         lines.append("No matching registered product description was available, so I cannot make a description-based recommendation.")
-    lines.append("Prices and SKUs were read from PostgreSQL at request time. Stock and external synchronization are unverified.")
+    lines.append("Prices, SKUs and stock quantities were read from PostgreSQL at request time. Stock can change after this read; reservations and external synchronization are unverified.")
     return ChatResponse(
         answer="\n".join(lines), route="product_search", model=None,
         company_data_verified=True, sources=sources, products=products,

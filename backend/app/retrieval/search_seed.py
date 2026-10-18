@@ -18,6 +18,7 @@ COMPANY_REFERENCE = re.compile(r"\b(?:sardars?|you|your|yours|we|our|ours)\b", r
 COMPANY_IDENTITY_QUESTION = re.compile(
     r"^\s*(?:what is|who are|tell me about|describe)\s+sardars\s*\??\s*$", re.I,
 )
+PRODUCT_DISCOVERY_QUESTION = re.compile(r"\b(?:what|which)\b.{0,100}\bproducts?\b", re.I)
 
 
 def is_company_overview_question(question: str) -> bool:
@@ -45,7 +46,12 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
 
     settings = Settings()
     with httpx.Client(timeout=remaining_timeout(settings.ollama_timeout_seconds)) as client:
-        point_filter: dict = {"must": conditions}
+        point_filter: dict = {"must": [*conditions]}
+        # A request for a product needs product-page evidence. In the full
+        # corpus, generic articles otherwise crowd the relevant product out
+        # of the eight-candidate budget.
+        if PRODUCT_DISCOVERY_QUESTION.search(question):
+            point_filter["must"].append({"key": "source_type", "match": {"value": "products"}})
         if visibility is not None:
             point_filter["should"] = [
                 {"key": "visibility", "match": {"value": value}}
@@ -69,7 +75,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
         if settings.brand_definition_profile_url and _needs_company_profile(question):
             response = client.post(
                 f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll",
-                json={"filter": {**point_filter, "must": [*conditions,
+                json={"filter": {**point_filter, "must": [*point_filter["must"],
                        {"key": "url", "match": {"value": settings.brand_definition_profile_url}}]},
                       "limit": 2, "with_payload": True, "with_vector": False},
                 timeout=remaining_timeout(settings.ollama_timeout_seconds),

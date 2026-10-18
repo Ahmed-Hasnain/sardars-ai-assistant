@@ -60,7 +60,7 @@ QUESTION_FILLER = {
 BRAND_LIST_REQUEST = re.compile(r"\bbrands\b", re.I)
 BRAND_OFFER_REQUEST = re.compile(
     r"\b(?:offer\w*|carr(?:y|ies)|sell\w*|provid\w*|have|get)\b|"
-    r"\bwhat\s+brands\s+does\s+sardars\b",
+    r"\b(?:what|which)\s+brands\s+does\s+sardars\b",
     re.I,
 )
 BRAND_LIST_QUALIFIER = re.compile(
@@ -320,14 +320,18 @@ def _brand_list_answer(question: str, excerpts: list[Evidence]) -> CitedAnswer |
     candidates: list[tuple[Evidence, str, int]] = []
     for excerpt in excerpts:
         # A product page or article may mention a competitor without saying
-        # Sardars carries it. Prefer the company's own overview/brand pages.
-        if (source_type(excerpt.url) != "pages"
-            or not re.search(r"\b(?:about|brands?)\b", excerpt.title, re.I)):
+        # Sardars carries it. Use company overview/brand pages or an
+        # authorized internal file that explicitly names Sardars in the claim.
+        company_page = (source_type(excerpt.url) == "pages"
+                        and re.search(r"\b(?:about|brands?)\b", excerpt.title, re.I))
+        internal_file = excerpt.url.startswith("/api/v1/ingestion/files/")
+        if not company_page and not internal_file:
             continue
         for raw in SENTENCE_PATTERN.split(excerpt.text):
             sentence = raw.strip()
             if (len(sentence) > MAX_SENTENCE_CHARS
                 or not BRAND_LIST_PATTERN.search(sentence)
+                or (internal_file and not re.search(r"\bsardars?\b", sentence, re.I))
                 or _contains_prompt_instruction(sentence)
                 or unsafe_descriptive_claim(sentence)):
                 continue

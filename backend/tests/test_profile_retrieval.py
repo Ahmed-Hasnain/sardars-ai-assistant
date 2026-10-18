@@ -73,6 +73,16 @@ def test_other_questions_and_disabled_hint_use_semantic_search_only(monkeypatch)
     assert len(calls) == 2
 
 
+def test_product_discovery_uses_visible_product_pages_within_candidate_limit(monkeypatch):
+    calls = setup(monkeypatch, [], [{"id": "product"}])
+    assert search_seed.search_for_role("What bathroom storage product does Sardars describe?", "staff") == [{"id": "product"}]
+    assert len(calls) == 2
+    query = calls[-1][1]
+    assert query["limit"] == 8
+    assert {"key": "source_type", "match": {"value": "products"}} in query["filter"]["must"]
+    assert {condition["match"]["value"] for condition in query["filter"]["should"]} == {"public", "staff"}
+
+
 @pytest.mark.parametrize("preferred,semantic", [([{"id": str(i)} for i in range(3)], []),
     ([], [{"id": str(i)} for i in range(9)])])
 def test_oversized_service_results_fail_before_evidence(monkeypatch, preferred, semantic):

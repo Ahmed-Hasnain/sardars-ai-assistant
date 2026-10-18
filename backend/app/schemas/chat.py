@@ -45,6 +45,7 @@ class ProductSource(BaseModel):
     database_values_verified: Literal[True] = True
     current_price_verified: Literal[True] = True
     external_sync_verified: Literal[False] = False
+    current_stock_verified: bool = False
 
 
 class MatchedProduct(BaseModel):
@@ -52,6 +53,7 @@ class MatchedProduct(BaseModel):
     title: str
     sku: str
     price: str
+    stock_quantity: int | None = None
     currency: str | None
     database_observed_at: AwareDatetime
     source_file_sha256: str

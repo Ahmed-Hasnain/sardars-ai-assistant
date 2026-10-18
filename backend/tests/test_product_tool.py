@@ -30,16 +30,18 @@ def products():
         db.add_all([
             Product(**common, source_row_number=1, title="Basin One", vendor="Sardars",
                     source_row_kind="variant", price_origin="synthetic_test", sku_origin="synthetic_test",
-                    variant_sku="TEST-1", variant_price=150, option1_name="Size", option1_value="Small"),
+                    variant_sku="TEST-1", variant_price=150, variant_inventory_qty=7,
+                    option1_name="Size", option1_value="Small"),
             Product(**common, source_row_number=2, source_row_kind="variant",
                     price_origin="synthetic_test", sku_origin="synthetic_test",
-                    variant_sku="TEST-2", variant_price=250, option1_name="Size", option1_value="Large"),
+                    variant_sku="TEST-2", variant_price=250, variant_inventory_qty=0,
+                    option1_name="Size", option1_value="Large"),
             Product(**common, source_row_number=3, source_row_kind="image_only",
                     price_origin="synthetic_test", sku_origin="synthetic_test",
                     variant_sku="TEST-IMAGE", variant_price=300, image_src="https://example.test/image"),
             Product(**(common | {"handle": "private-basin", "visibility": "admin"}), source_row_number=4,
                     title="Private Basin", source_row_kind="variant", price_origin="synthetic_test", sku_origin="synthetic_test",
-                    variant_sku="TEST-PRIVATE", variant_price=400),
+                    variant_sku="TEST-PRIVATE", variant_price=400, variant_inventory_qty=13),
         ])
     try:
         yield sessions
@@ -54,8 +56,10 @@ def test_exact_handle_sku_and_image_row(products):
         image = get_product_details(db, "staff", ProductArguments(identifier="TEST-IMAGE"))
     assert by_handle.query_match == "handle"
     assert [(v.sku, v.price) for v in by_handle.variants] == [("TEST-1", "150"), ("TEST-2", "250")]
+    assert [(v.sku, v.stock_quantity) for v in by_handle.variants] == [("TEST-1", 7), ("TEST-2", 0)]
     assert by_sku.query_match == "sku" and [(v.sku, v.price) for v in by_sku.variants] == [("TEST-2", "250")]
     assert image.variants[0].row_kind == "image_only" and image.variants[0].price == "300"
+    assert image.variants[0].stock_quantity is None and not image.inventory_verified
     assert image.title == "Basin One"
     assert by_handle.database_values_verified is True and by_handle.external_sync_verified is False
     assert by_handle.currency is None and by_handle.imported_at.tzinfo is not None
@@ -112,10 +116,42 @@ def test_chat_uses_database_without_model_choice(products):
     assert response.product_source.database_values_verified is True
     assert response.product_source.current_price_verified is True
     assert response.product_source.external_sync_verified is False
+    assert response.product_source.current_stock_verified is True
     assert "SKU TEST-1" in response.answer and "price 150" in response.answer
     assert "SKU TEST-2" in response.answer and "price 250" in response.answer
+    assert "database stock 7 units" in response.answer and "database stock 0 units" in response.answer
     assert "synthetic" not in response.answer.lower()
     assert "image-only CSV row" in image.answer and "price 300" in image.answer
+    assert image.product_source.current_stock_verified is False
+    assert "database stock not recorded" in image.answer
+
+
+def test_stock_lookup_reads_current_authorized_variant_values(products):
+    actor = SimpleNamespace(role="staff", is_active=True)
+    with products() as db:
+        positive = asyncio.run(answer_product("Is SKU TEST-1 in stock?", actor, db))
+        zero = asyncio.run(answer_product("Check stock for SKU TEST-2", actor, db))
+        hidden = asyncio.run(answer_product("Check stock for SKU TEST-PRIVATE", actor, db))
+        promise = asyncio.run(answer_product("Can Sardars guarantee stock today?", actor, db))
+    assert positive.route == zero.route == "product"
+    assert positive.product_source.current_stock_verified and "database stock 7 units" in positive.answer
+    assert zero.product_source.current_stock_verified and "database stock 0 units" in zero.answer
+    assert hidden.product_source is None and "13 units" not in hidden.answer
+    assert promise.product_source is None and "can't guarantee stock" in promise.answer
+
+
+def test_unrecorded_or_invalid_stock_cannot_be_reported_as_verified(products):
+    with products.begin() as db:
+        db.query(Product).filter(Product.variant_sku == "TEST-1").update({"variant_inventory_qty": None})
+        db.query(Product).filter(Product.variant_sku == "TEST-2").update({"variant_inventory_qty": -1})
+    actor = SimpleNamespace(role="staff", is_active=True)
+    with products() as db:
+        missing = asyncio.run(answer_product("Check stock for SKU TEST-1", actor, db))
+        invalid = asyncio.run(answer_product("Check stock for SKU TEST-2", actor, db))
+    assert missing.product_source.current_stock_verified is False
+    assert "database stock not recorded" in missing.answer
+    assert invalid.company_data_verified is False and invalid.product_source is None
+    assert "-1 units" not in invalid.answer
 
 
 def test_missing_and_ambiguous_chat_answers(products):
