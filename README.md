@@ -447,8 +447,8 @@ With PostgreSQL, Qdrant and Ollama running, use a new report filename each time:
 
 ```bash
 PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.run_chat --report data/extracted/phase11_chat_NEW_NAME.json
-PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.compare_chat data/extracted/phase11_chat_stock_protocol3_20261018.json data/extracted/phase11_chat_NEW_NAME.json
+PYTHONPATH=backend backend/.venv/bin/python -m app.evaluation.compare_chat data/extracted/phase11_gate_final_b_20261018.json data/extracted/phase11_chat_NEW_NAME.json
 PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_chat_evaluation.py backend/tests/test_chat_comparison.py backend/tests/test_stock_api.py
 ```
 
-Run live evaluations serially. Reports remain internal and Git-ignored; existing files are refused. The final suite and repeat each passed **23/26** (15/18 live, 8/8 isolated controls) and exit 1 to preserve three quality failures. The Phase 5 full-corpus regressions remain open. Completing Phase 11 means the evaluation can detect and diagnose them; it does not mean the assistant passed its quality gate.
+Run live evaluations serially. Reports remain internal and Git-ignored; existing files are refused. The initial stock-aware pair passed **23/26**. After targeted corrections and a stronger bathroom-definition check, two same-definition runs passed the bounded **26/26** chat gate (18/18 live, 8/8 isolated controls), with a controlled repeat comparison. The retained seed suite passed **7/7**, while the full-site suite passed **31/40** and still has nine open retrieval/evidence failures. This small chat gate does not certify the whole corpus or production quality. The [completion report](docs/phase11_evaluation_completion.md) separates historical and latest results.

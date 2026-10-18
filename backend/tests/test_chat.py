@@ -82,11 +82,22 @@ def test_chat_reports_model_failure() -> None:
 def test_general_model_cannot_add_unsourced_sardars_claim() -> None:
     result = ChatResult("Sardars guarantees delivery tomorrow.", "test-model", 5, 7, 10.0)
     with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, return_value=result):
-        response = client.post("/api/v1/chat", json={"message": "What is a thermostatic mixer?"})
+        response = client.post("/api/v1/chat", json={"message": "What is a mixer?"})
     assert response.status_code == 200
     assert response.json()["route"] == "general"
     assert "delivery" not in response.json()["answer"]
     assert response.json()["company_data_verified"] is False
+
+
+def test_stable_thermostatic_definition_is_bathroom_specific_without_model() -> None:
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock) as model:
+        response = client.post("/api/v1/chat", json={"message": "What is a thermostatic mixer?"})
+    assert response.status_code == 200
+    assert response.json()["route"] == "general"
+    assert "hot and cold water" in response.json()["answer"]
+    assert "shower or tap" in response.json()["answer"]
+    assert response.json()["sources"] == []
+    model.assert_not_awaited()
 
 
 def test_general_product_policy_concept_stays_available() -> None:

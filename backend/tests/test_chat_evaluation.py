@@ -116,7 +116,7 @@ def test_stock_checker_catches_wrong_quantity_and_tracks_zero(sessions):
 def test_general_answer_records_context_counts_without_prompt_text(sessions):
     model = AsyncMock()
     model.chat.return_value = ChatResult("It controls temperature.", "fixture", 12, 4, 10)
-    c = case(category="technical", question="What is a thermostatic mixer?", expected_route="general",
+    c = case(category="technical", question="What is a mixer?", expected_route="general",
              expected_tools=[], expected_sku=None, answer_contains=["temperature"])
     original = chat.chat_model
     row = asyncio.run(evaluate(c, model, sessions))
@@ -130,9 +130,15 @@ def test_general_answer_records_context_counts_without_prompt_text(sessions):
 def test_general_answer_requires_bathroom_context_not_just_temperature(sessions):
     model = AsyncMock()
     model.chat.return_value = ChatResult("A food mixer controls the temperature of ingredients.", "fixture", 12, 10, 15)
-    c = case(category="technical", question="What is a thermostatic mixer?", expected_route="general",
+    c = case(category="technical", question="What is a bathroom tap mixer?", expected_route="general",
              expected_tools=[], expected_sku=None, answer_contains=["water", "temperature"],
              answer_not_contains=["food", "ingredients"])
+    row = asyncio.run(evaluate(c, model, sessions))
+    assert row["checks"]["answer"] is False and not row["passed"]
+    model.chat.return_value = ChatResult("It adjusts water temperature for a bathroom heating system.",
+                                         "fixture", 12, 10, 15)
+    c = c.model_copy(update={"answer_contains_any": ["shower", "tap", "bathroom fixture"],
+                             "answer_not_contains": ["heating system"]})
     row = asyncio.run(evaluate(c, model, sessions))
     assert row["checks"]["answer"] is False and not row["passed"]
 
