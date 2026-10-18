@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.ingestion.site_index import EMBEDDING_BATCH_SIZE, IndexingError, WebsiteIndexer
 from app.retrieval import search_seed
 from app.retrieval.seed_config import COLLECTION, DIMENSIONS
-from app.retrieval.limits import CANDIDATE_LIMIT
+from app.retrieval.search_seed import SEARCH_POOL_LIMIT
 
 
 def _settings() -> Settings:
@@ -182,7 +182,7 @@ def test_seed_retrieval_uses_the_same_configured_services_and_collection(monkeyp
         if request.url.path == "/api/embed":
             return httpx.Response(200, json={"embeddings": [[0.1] * DIMENSIONS]})
         assert request.url.path == f"/collections/{COLLECTION}/points/query"
-        assert json.loads(request.content)["limit"] == CANDIDATE_LIMIT
+        assert json.loads(request.content)["limit"] == SEARCH_POOL_LIMIT
         return httpx.Response(200, json={"result": {"points": []}})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))

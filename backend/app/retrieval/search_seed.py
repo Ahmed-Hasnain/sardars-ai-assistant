@@ -7,7 +7,6 @@ from app.api.answer_deadlines import remaining_timeout
 from app.core.config import Settings
 from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 from app.retrieval.authorization import ALLOWED_VISIBILITIES
-from app.retrieval.limits import CANDIDATE_LIMIT
 
 
 COMPANY_OVERVIEW = re.compile(
@@ -19,6 +18,7 @@ COMPANY_IDENTITY_QUESTION = re.compile(
     r"^\s*(?:what is|who are|tell me about|describe)\s+sardars\s*\??\s*$", re.I,
 )
 PRODUCT_DISCOVERY_QUESTION = re.compile(r"\b(?:what|which)\b.{0,100}\bproducts?\b", re.I)
+SEARCH_POOL_LIMIT = 32
 
 
 def is_company_overview_question(question: str) -> bool:
@@ -90,7 +90,7 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
             json={
                 "query": vector,
                 "filter": point_filter,
-                "limit": CANDIDATE_LIMIT - len(preferred),
+                "limit": SEARCH_POOL_LIMIT - len(preferred),
                 "with_payload": True,
                 "with_vector": False,
             },
@@ -99,10 +99,12 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
         response.raise_for_status()
 
         points = response.json()["result"]["points"]
-        if not isinstance(points, list) or len(points) > CANDIDATE_LIMIT - len(preferred):
+        if not isinstance(points, list) or len(points) > SEARCH_POOL_LIMIT - len(preferred):
             raise ValueError("Unexpected retrieval candidate count")
     result = []
     seen = set()
+    # Return the role-prefiltered pool. The caller must recheck every point
+    # against PostgreSQL, then rank/select at most eight for answer evidence.
     for point in preferred + points:
         if not isinstance(point, dict) or not isinstance(point.get("id"), (str, int)):
             raise ValueError("Unexpected retrieval point")

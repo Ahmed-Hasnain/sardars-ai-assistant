@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.core.config import Settings
-from app.retrieval import search_seed
+from app.retrieval import search_seed, selection
 from app.retrieval.seed_config import DIMENSIONS
 
 HTTPX_CLIENT = httpx.Client
@@ -37,7 +37,7 @@ def test_bongio_profile_lookup_and_semantic_search_share_staff_permission_filter
     points = search_seed.search_for_role("What is Bongio?", "staff")
     assert points == preferred + semantic and len(points) == 8
     scroll, query = calls[1:]
-    assert scroll[1]["limit"] == 2 and query[1]["limit"] == 6
+    assert scroll[1]["limit"] == 2 and query[1]["limit"] == 30
     for _, body in (scroll, query):
         assert {condition["match"]["value"] for condition in body["filter"]["should"]} == {"public", "staff"}
         assert {"key": "review_status", "match": {"value": "approved"}} in body["filter"]["must"]
@@ -52,7 +52,7 @@ def test_company_business_question_includes_authorized_profile(monkeypatch):
 
     assert points == preferred + semantic
     scroll, query = calls[1:]
-    assert scroll[1]["limit"] == 2 and query[1]["limit"] == 6
+    assert scroll[1]["limit"] == 2 and query[1]["limit"] == 30
     assert {condition["match"]["value"] for condition in scroll[1]["filter"]["should"]} == {"public", "staff"}
     assert {"key": "url", "match": {"value": "https://sardarandco.com/pages/about-us"}} in scroll[1]["filter"]["must"]
 
@@ -60,7 +60,7 @@ def test_company_business_question_includes_authorized_profile(monkeypatch):
 def test_missing_profile_keeps_full_semantic_budget(monkeypatch):
     calls = setup(monkeypatch, [], [{"id": "other"}])
     assert search_seed.search_for_role("What is Bongio?", "admin") == [{"id": "other"}]
-    assert calls[-1][1]["limit"] == 8
+    assert calls[-1][1]["limit"] == 32
     assert len(calls[1][1]["filter"]["should"]) == 3
 
 
@@ -78,13 +78,58 @@ def test_product_discovery_uses_visible_product_pages_within_candidate_limit(mon
     assert search_seed.search_for_role("What bathroom storage product does Sardars describe?", "staff") == [{"id": "product"}]
     assert len(calls) == 2
     query = calls[-1][1]
-    assert query["limit"] == 8
+    assert query["limit"] == 32
     assert {"key": "source_type", "match": {"value": "products"}} in query["filter"]["must"]
     assert {condition["match"]["value"] for condition in query["filter"]["should"]} == {"public", "staff"}
 
 
+def test_later_exact_title_is_promoted_without_expanding_answer_budget(monkeypatch):
+    distractors = [{"id": str(i), "payload": {"title": "Basin fitting", "text": "Ceramic sink."}}
+                   for i in range(12)]
+    target = {"id": "target", "payload": {"title": "Square E corner basin",
+                                             "text": "The basin includes an overflow."}}
+    calls = setup(monkeypatch, [], [*distractors, target])
+    question = "Does the Square E corner basin include overflow?"
+    points = search_seed.search_for_role(question, "staff")
+    assert len(points) == 13 and points[-1] == target
+    monkeypatch.setattr(selection, "authorized_points", lambda db, role, rows: rows)
+    selected = selection.select_authorized_points(None, "staff", question, points)
+    assert len(selected) == 8 and selected[0] == target
+    assert calls[-1][1]["limit"] == 32
+    assert {condition["match"]["value"] for condition in calls[-1][1]["filter"]["should"]} == {"public", "staff"}
+
+
+def test_selection_filters_sources_before_reranking(monkeypatch):
+    question = "Does the Square E corner basin include overflow?"
+    hidden = [{"id": str(i), "payload": {"title": "Square E corner basin overflow", "text": "overflow"}}
+              for i in range(20)]
+    visible = {"id": "visible", "payload": {"title": "Square E corner basin", "text": "overflow"}}
+    monkeypatch.setattr(selection, "authorized_points", lambda db, role, rows: [visible])
+    assert selection.select_authorized_points(None, "staff", question, [*hidden, visible]) == [visible]
+
+
+def test_broad_discovery_keeps_semantic_order_after_authorization(monkeypatch):
+    rows = [{"id": str(i), "payload": {"title": "Storage product", "text": "bathroom storage"}}
+            for i in range(9)]
+    monkeypatch.setattr(selection, "authorized_points", lambda db, role, points: points)
+    assert selection.select_authorized_points(
+        None, "staff", "What bathroom storage product does Sardars describe?", rows,
+    ) == rows[:8]
+
+
+def test_company_profile_remains_first_after_authorization(monkeypatch):
+    profile = {"id": "profile", "payload": {
+        "url": "https://sardarandco.com/pages/about-us", "title": "About Us", "text": "Sardars lists brands.",
+    }}
+    other = {"id": "other", "payload": {"url": "https://sardarandco.com/blogs/news/brands",
+                                          "title": "Brands Sardars offers", "text": "Brands are featured."}}
+    monkeypatch.setattr(selection, "authorized_points", lambda db, role, points: points)
+    assert selection.select_authorized_points(None, "staff", "Which brands does Sardars mention?",
+                                              [other, profile])[0] == profile
+
+
 @pytest.mark.parametrize("preferred,semantic", [([{"id": str(i)} for i in range(3)], []),
-    ([], [{"id": str(i)} for i in range(9)])])
+    ([], [{"id": str(i)} for i in range(33)])])
 def test_oversized_service_results_fail_before_evidence(monkeypatch, preferred, semantic):
     setup(monkeypatch, preferred, semantic)
     with pytest.raises(ValueError, match="Unexpected"):

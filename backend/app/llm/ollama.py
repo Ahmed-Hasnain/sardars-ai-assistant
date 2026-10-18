@@ -17,7 +17,7 @@ class OllamaChatModel:
             "messages": messages,
             "stream": False,
             "think": False,
-            "keep_alive": self.settings.ollama_keep_alive,
+            "keep_alive": self.settings.ollama_chat_keep_alive,
             "options": {"num_predict": 256},
         }
 
@@ -67,7 +67,7 @@ class OllamaChatModel:
             "tools": tools,
             "stream": False,
             "think": False,
-            "keep_alive": self.settings.ollama_keep_alive,
+            "keep_alive": self.settings.ollama_chat_keep_alive,
             "options": {"num_predict": 256},
         }
         try:

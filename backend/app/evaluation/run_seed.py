@@ -13,7 +13,7 @@ from app.db.session import SessionLocal
 from app.llm.ollama import OllamaChatModel
 from app.rag.answer_seed import CitedAnswer, FALLBACK, answer_from_points
 from app.retrieval.search_seed import search_approved
-from app.retrieval.authorization import authorized_points
+from app.retrieval.selection import select_authorized_points
 
 
 CASES_PATH = Path(__file__).with_name("seed_cases.json")
@@ -49,7 +49,7 @@ async def main() -> None:
         if points is None:
             points = await asyncio.to_thread(search_approved, question)
             with SessionLocal() as db:
-                points = authorized_points(db, "staff", points)
+                points = select_authorized_points(db, "staff", question, points)
         result = await answer_from_points(question, points, model)
         failures = check_result(result, case["expected_source"], case["answer_contains"])
         print(f"{number}. {'PASS' if not failures else 'FAIL'}: {question}")
