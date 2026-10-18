@@ -13,6 +13,7 @@ from app.db.models import Conversation, ConversationMessage, SourceRegistration,
 from app.db.products import Product
 from app.llm.base import ChatMessage
 from app.rag.text_safety import contains_prompt_instruction
+from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatResponse
 from app.schemas.conversations import ConversationPage, ConversationSummary, MessageView
 
@@ -195,19 +196,19 @@ def list_owned(db: Session, user: User, limit: int, offset: int) -> list[Convers
     ) for row, preview in rows]
 
 
-def _visible_history_ids(db: Session, user: User, messages: list[ConversationMessage]) -> tuple[set[str], set[str]]:
+def _visible_history_ids(db: Session, user: User, messages: list[ConversationMessage]) -> tuple[dict[str, SourceRegistration], set[str]]:
     source_ids = {identity for message in messages for identity in (message.source_ids or [])}
     handles = {handle for message in messages if message.role == "assistant"
                for handle in (message.product_handles or [])}
     permitted = {"public", "staff", "admin"} if user.role == "admin" else {"public", "staff"}
-    visible_sources = set()
+    visible_sources: dict[str, SourceRegistration] = {}
     if source_ids:
-        visible_sources = set(db.scalars(select(SourceRegistration.source_id).where(
+        visible_sources = {source.source_id: source for source in db.scalars(select(SourceRegistration).where(
             SourceRegistration.source_id.in_(source_ids),
             SourceRegistration.is_active.is_(True),
             SourceRegistration.index_status == "ready",
             SourceRegistration.visibility.in_(permitted),
-        )).all())
+        )).all()}
     visible_handles = set()
     if handles:
         allowed_products = permitted & {"staff", "admin"}
@@ -239,13 +240,22 @@ def read_page(
     visible_sources, visible_handles = _visible_history_ids(db, user, page)
     messages = []
     for row in page:
-        authorized = (set(row.source_ids or []) <= visible_sources
+        authorized = (set(row.source_ids or []) <= set(visible_sources)
                       and set(row.product_handles or []) <= visible_handles) if row.role == "assistant" else True
         messages.append(MessageView(
             id=row.id, role=row.role, content=row.content if authorized else HIDDEN_ANSWER,
             route=row.route, model=row.model, prompt_tokens=row.prompt_tokens,
             output_tokens=row.output_tokens, duration_ms=row.duration_ms,
             product_handles=list(row.product_handles or []) if authorized else [],
+            sources=[SourceCitation(
+                number=number, source_id=source_id,
+                title=visible_sources[source_id].title or visible_sources[source_id].original_filename
+                      or visible_sources[source_id].url,
+                url=visible_sources[source_id].url,
+                fetched_at=(visible_sources[source_id].fetched_at.isoformat()
+                            if visible_sources[source_id].fetched_at else None),
+            ) for number, source_id in enumerate(dict.fromkeys(row.source_ids or []), start=1)]
+            if authorized and row.role == "assistant" else [],
             created_at=row.created_at,
         ))
     return ConversationPage(

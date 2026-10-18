@@ -31,3 +31,27 @@ it('shows conversation previews and a warning on reopened history', () => {
   expect(html).toContain('Earlier answer')
   expect(html).toContain('Earlier answers may be stale.')
 })
+
+it('renders cited Markdown while blocking raw HTML and unsafe links', () => {
+  mocked.state = {
+    token: 'test-token', status: 'idle',
+    user: { id: 1, email: 'staff@example.com', role: 'staff', is_active: true },
+    conversationId: 'owned-id', historyLoading: false, historyHasMore: false,
+    historyError: null, conversationLoading: false, olderLoading: false, olderCursor: null,
+    conversations: [], historicalNotice: null,
+    messages: [{ id: '1', role: 'assistant',
+      text: '**Supported** answer.\n\n| Item | Value |\n| --- | --- |\n| Mixer | Brass |\n\n<script>alert(1)</script> [bad](javascript:alert(2)) [unapproved](https://evil.example)',
+      sources: [{ number: 1, source_id: 'a', title: 'About', url: 'https://example.com/about', fetched_at: null },
+        { number: 2, source_id: 'b', title: 'Profile.pdf', url: '/api/v1/ingestion/files/11111111-1111-1111-1111-111111111111', fetched_at: null }],
+    }],
+  }
+  const html = renderToStaticMarkup(<App />)
+  expect(html).toContain('<strong>Supported</strong>')
+  expect(html).toContain('<table>')
+  expect(html).not.toContain('<script>')
+  expect(html).not.toContain('href="javascript:')
+  expect(html).not.toContain('href="https://evil.example')
+  expect(html).toContain('href="https://example.com/about"')
+  expect(html).toContain('Profile.pdf')
+  expect(html).toContain('type="button"')
+})

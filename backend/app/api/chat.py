@@ -1,8 +1,10 @@
 import asyncio
+import json
 import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -72,6 +74,32 @@ async def chat(
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Conversation service unavailable") from exc
+
+
+@router.post("/chat/stream", openapi_extra=QUESTION_REQUEST_OPENAPI)
+async def chat_stream(
+    request: Annotated[ChatRequest, Depends(parse_question_request)],
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> StreamingResponse:
+    # The full answer is checked and saved before response headers or text are sent.
+    # This deliberately streams delivery, not unverified model tokens.
+    response = await chat(request, user, db)
+
+    async def events():
+        yield _sse("start", {"conversation_id": response.conversation_id})
+        answer = response.answer
+        for offset in range(0, len(answer), 100):
+            yield _sse("chunk", {"text": answer[offset:offset + 100]})
+        yield _sse("complete", response.model_dump(mode="json"))
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff",
+    })
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 async def _chat_turn(request: ChatRequest, user: User, db: Session) -> ChatResponse:

@@ -8,6 +8,14 @@ function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+function streamed(answer: string, id: string, sources: unknown[] = []): Response {
+  const reply = { answer, route: 'company', sources, conversation_id: id, product_handles: [] }
+  return new Response(`event: start\ndata: ${JSON.stringify({ conversation_id: id })}\n\n` +
+    `event: chunk\ndata: ${JSON.stringify({ text: answer })}\n\n` +
+    `event: complete\ndata: ${JSON.stringify(reply)}\n\n`,
+  { headers: { 'Content-Type': 'text/event-stream' } })
+}
+
 function memoryStorage(): Storage {
   const values = new Map<string, string>()
   return {
@@ -55,12 +63,9 @@ describe('chat session', () => {
       if (path.endsWith('/auth/login')) return Promise.resolve(json({ access_token: 'test-token' }))
       if (path.endsWith('/auth/me')) return Promise.resolve(json(user))
       if (path.includes('/conversations?')) return Promise.resolve(json([summary('first-id')]))
-      if (path.endsWith('/chat')) {
+      if (path.endsWith('/chat/stream')) {
         chatCount += 1
-        return Promise.resolve(json({
-          answer: chatCount === 1 ? 'First answer' : 'Second answer', route: 'company',
-          sources: [], conversation_id: 'first-id', product_handles: [],
-        }))
+        return Promise.resolve(streamed(chatCount === 1 ? 'First answer' : 'Second answer', 'first-id'))
       }
       throw new Error(`Unexpected request: ${path}`)
     })
@@ -73,7 +78,7 @@ describe('chat session', () => {
     await useChatStore.getState().ask('What brands?')
     await useChatStore.getState().ask('Tell me more')
 
-    const chatCalls = fetchMock.mock.calls.filter(([path]) => path.endsWith('/chat'))
+    const chatCalls = fetchMock.mock.calls.filter(([path]) => path.endsWith('/chat/stream'))
     expect(JSON.parse(String(chatCalls[0][1].body))).toEqual({ message: 'What brands?' })
     expect(JSON.parse(String(chatCalls[1][1].body))).toEqual({ message: 'Tell me more', conversation_id: 'first-id' })
     expect(useChatStore.getState().messages.map((message) => message.text)).toEqual([
@@ -92,7 +97,8 @@ describe('chat session', () => {
       if (path.includes('/conversations/owned-id?')) return Promise.resolve(json({
         conversation: summary('owned-id'), historical_notice: 'Earlier answers may be stale.',
         next_before_message_id: null,
-        messages: [{ id: 1, role: 'user', content: 'Old question' }, { id: 2, role: 'assistant', content: 'Old answer' }],
+        messages: [{ id: 1, role: 'user', content: 'Old question' }, { id: 2, role: 'assistant', content: 'Old answer',
+          sources: [{ number: 1, source_id: 'source-1', title: 'About', url: 'https://example.com/about', fetched_at: null }] }],
       }))
       throw new Error(`Unexpected request: ${path}`)
     })
@@ -106,6 +112,7 @@ describe('chat session', () => {
     expect(useChatStore.getState().user).toEqual(user)
     expect(useChatStore.getState().conversationId).toBe('owned-id')
     expect(useChatStore.getState().messages.map((message) => message.text)).toEqual(['Old question', 'Old answer'])
+    expect(useChatStore.getState().messages[1].sources[0].title).toBe('About')
     expect(useChatStore.getState().historicalNotice).toBe('Earlier answers may be stale.')
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer saved-token')
   })

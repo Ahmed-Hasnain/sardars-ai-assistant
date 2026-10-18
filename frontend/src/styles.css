@@ -66,11 +66,28 @@ a{color:inherit}
 .message-body{min-width:0;flex:1;padding-top:4px}
 .message-author{font-size:12px;font-weight:700}
 .message-text{margin:9px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;font-size:14px;color:#435249}
+.markdown{white-space:normal}
+.markdown>:first-child{margin-top:0}
+.markdown>:last-child{margin-bottom:0}
+.markdown p,.markdown ul,.markdown ol,.markdown blockquote,.markdown pre{margin:0 0 12px}
+.markdown h1,.markdown h2,.markdown h3,.markdown h4{margin:18px 0 8px;line-height:1.35;color:#263d2f}
+.markdown h1{font-size:20px}.markdown h2{font-size:18px}.markdown h3,.markdown h4{font-size:16px}
+.markdown ul,.markdown ol{padding-left:22px}.markdown li{margin:3px 0}
+.markdown blockquote{padding:3px 12px;border-left:3px solid #a8c8ad;color:#617369}
+.markdown code{padding:1px 4px;border-radius:4px;background:#e9eee8;font-size:.92em}
+.markdown pre{max-width:100%;overflow-x:auto;padding:12px;border-radius:8px;background:#e9eee8}
+.markdown pre code{padding:0;background:transparent}
+.markdown table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 12px}
+.markdown th,.markdown td{padding:6px 9px;border:1px solid #cbd9cd;text-align:left}
+.markdown a{color:#17613c;text-decoration:underline}
 .sources{margin-top:19px}
 .sources-heading{margin-bottom:9px;color:#839187;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em}
 .source-list{display:flex;flex-wrap:wrap;gap:8px}
 .source-link{display:flex;align-items:center;gap:8px;max-width:100%;padding:7px 10px;border:1px solid #d9e4d9;border-radius:8px;background:#f8fbf7;color:#3b6850;text-decoration:none;font-size:11px;overflow-wrap:anywhere}
+.source-link[type=button]{cursor:pointer;font:inherit;font-size:11px}
 .source-link:hover{border-color:#83aa90}
+.source-error{margin-top:8px;color:#a13e34;font-size:11px}
+:focus-visible{outline:3px solid #d99427;outline-offset:2px}
 .source-index{font-weight:800;color:#326745}
 .thinking{display:flex;align-items:center;gap:10px;margin-left:45px;color:#738779;font-size:12px}
 .spinner{width:13px;height:13px;border:2px solid #b5cfbd;border-top-color:#327b51;border-radius:50%;animation:spin .8s linear infinite}

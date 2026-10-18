@@ -99,6 +99,22 @@ def test_chat_persists_and_reviews_bounded_general_followup(runtime) -> None:
         assert len(db.scalars(select(ConversationMessage)).all()) == 4
 
 
+def test_streamed_turn_uses_owned_history_and_is_saved_before_delivery(runtime) -> None:
+    client, sessions = runtime
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock,
+               return_value=ChatResult("A mixer combines water.", "local", None, None, None)):
+        response = client.post("/api/v1/chat/stream", headers=headers(), json={"message": "What is a mixer?"})
+    assert response.status_code == 200
+    assert "event: complete" in response.text
+    listed = client.get("/api/v1/conversations", headers=headers()).json()
+    assert len(listed) == 1
+    page = client.get(f"/api/v1/conversations/{listed[0]['id']}", headers=headers()).json()
+    assert page["messages"][1]["content"] == "A mixer combines water."
+    assert client.get(f"/api/v1/conversations/{listed[0]['id']}", headers=headers(2)).status_code == 404
+    with sessions() as db:
+        assert len(db.scalars(select(ConversationMessage)).all()) == 2
+
+
 def test_topic_change_omits_old_history(runtime) -> None:
     client, _ = runtime
     with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock) as model:
@@ -231,7 +247,7 @@ def test_revoked_source_redacts_historical_answer(runtime) -> None:
     with sessions.begin() as db:
         db.add(SourceRegistration(
             source_id=source_id, url=url, source_type="pages", content_sha256="a" * 64,
-            visibility="staff", is_active=True, authorization_basis="test",
+            visibility="staff", is_active=True, authorization_basis="test", title="About Us",
         ))
     cited = CitedAnswer("Private source answer [1]", [CitedSource(1, source_id, "About Us", url, None)])
     with patch("app.api.chat.answer_company", new_callable=AsyncMock, return_value=cited):
@@ -239,11 +255,23 @@ def test_revoked_source_redacts_historical_answer(runtime) -> None:
             "message": "Which brands does Sardars mention?",
         })
     identity = response.json()["conversation_id"]
-    assert "Private source answer" in client.get(f"/api/v1/conversations/{identity}", headers=headers()).text
+    visible_page = client.get(f"/api/v1/conversations/{identity}", headers=headers()).json()
+    assert visible_page["messages"][1]["content"] == "Private source answer [1]"
+    assert visible_page["messages"][1]["sources"] == [{
+        "number": 1, "source_id": source_id, "title": "About Us", "url": url,
+        "fetched_at": None, "content_derivation": None, "original_content_sha256": None,
+    }]
+    assert visible_page["messages"][0]["sources"] == []
+    with sessions.begin() as db:
+        db.get(SourceRegistration, source_id).visibility = "admin"
+    role_changed = client.get(f"/api/v1/conversations/{identity}", headers=headers()).json()
+    assert role_changed["messages"][1]["sources"] == []
+    assert role_changed["messages"][1]["content"] != "Private source answer [1]"
     with sessions.begin() as db:
         db.get(SourceRegistration, source_id).is_active = False
     page = client.get(f"/api/v1/conversations/{identity}", headers=headers()).json()
     assert page["messages"][1]["content"] != "Private source answer [1]"
+    assert page["messages"][1]["sources"] == []
     assert "Private source answer" not in str(page)
 
 

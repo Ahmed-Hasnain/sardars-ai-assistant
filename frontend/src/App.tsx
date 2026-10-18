@@ -1,4 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { downloadSource, isFileSourceUrl } from './api'
 import { useChatStore, type Message } from './store'
 
 function safeSourceUrl(url: string): string | null {
@@ -11,19 +14,47 @@ function safeSourceUrl(url: string): string | null {
 }
 
 function MessageCard({ message }: { message: Message }) {
+  const token = useChatStore((state) => state.token)
+  const [sourceError, setSourceError] = useState<string | null>(null)
+  const approvedLinks = new Set(message.sources.map((source) => safeSourceUrl(source.url)))
+  async function openFile(source: Message['sources'][number]) {
+    if (!token) return
+    try {
+      setSourceError(null)
+      await downloadSource(token, source)
+    } catch (error) {
+      setSourceError(error instanceof Error ? error.message : 'Could not open this source.')
+    }
+  }
   return (
     <article className={`message ${message.role}`}>
       <div className="message-avatar" aria-hidden="true">{message.role === 'user' ? 'You' : 'S'}</div>
       <div className="message-body">
         <div className="message-author">{message.role === 'user' ? 'You' : 'Sardars Assistant'}</div>
-        <p className="message-text">{message.text}</p>
+        {message.role === 'assistant' ? (
+          <div className="message-text markdown">
+            <Markdown remarkPlugins={[remarkGfm]} skipHtml allowedElements={[
+              'p', 'br', 'strong', 'em', 'del', 'a', 'h1', 'h2', 'h3', 'h4',
+              'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr',
+              'table', 'thead', 'tbody', 'tr', 'th', 'td',
+            ]} components={{ a: ({ href, children }) => {
+              const safe = href ? safeSourceUrl(href) : null
+              return safe && approvedLinks.has(safe)
+                ? <a href={safe} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>
+            } }}>{message.text}</Markdown>
+          </div>
+        ) : <p className="message-text">{message.text}</p>}
         {message.sources.length > 0 && (
           <div className="sources" aria-label="Sources for this answer">
             <div className="sources-heading">Sources</div>
             <div className="source-list">
               {message.sources.map((source) => {
                 const href = safeSourceUrl(source.url)
-                return href ? (
+                return isFileSourceUrl(source.url) ? (
+                  <button className="source-link" type="button" key={`${source.source_id}-${source.number}`} onClick={() => void openFile(source)}>
+                    <span className="source-index">{source.number}</span><span>{source.title}</span><span aria-hidden="true">↓</span>
+                  </button>
+                ) : href ? (
                   <a className="source-link" key={`${source.source_id}-${source.number}`} href={href} target="_blank" rel="noopener noreferrer">
                     <span className="source-index">{source.number}</span>
                     <span>{source.title}</span>
@@ -37,6 +68,7 @@ function MessageCard({ message }: { message: Message }) {
                 )
               })}
             </div>
+            {sourceError && <div className="source-error" role="alert">{sourceError}</div>}
           </div>
         )}
       </div>
@@ -125,7 +157,7 @@ function Chat() {
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand"><span className="brand-mark">S</span><span>Sardars <strong>AI</strong></span></div>
-          <button className="new-chat-button" onClick={() => { newChat(); setDraft('') }} disabled={status === 'sending'}>＋ <span>New conversation</span></button>
+          <button className="new-chat-button" aria-label="New conversation" onClick={() => { newChat(); setDraft('') }} disabled={status === 'sending'}>＋ <span>New conversation</span></button>
           <div className="sidebar-label">WORKSPACE</div>
           <div className="sidebar-item active"><span aria-hidden="true">◇</span> Assistant</div>
           <section className={`history-section ${historyOpen ? 'open' : ''}`} aria-label="Recent conversations">
@@ -163,8 +195,11 @@ function Chat() {
           <div><span className="topbar-title">Assistant</span><span className="topbar-subtitle">Internal knowledge &amp; product help</span></div>
           <div className="topbar-status"><span className="status-dot" /> {conversationId ? 'Conversation active' : 'Ready to help'}</div>
         </header>
+        <div className="sr-only" role="status" aria-live="polite">
+          {status === 'sending' ? 'Preparing answer' : messages.at(-1)?.role === 'assistant' ? 'Answer ready' : ''}
+        </div>
 
-        <div className="conversation" aria-live="polite">
+        <div className="conversation">
           {conversationLoading ? (
             <div className="conversation-loading" role="status"><span className="spinner" /> Opening conversation…</div>
           ) : messages.length === 0 ? (
@@ -182,7 +217,7 @@ function Chat() {
               {historicalNotice && <div className="history-notice">{historicalNotice}</div>}
               {olderCursor && <button className="older-button" type="button" onClick={() => void loadOlderMessages()} disabled={olderLoading}>{olderLoading ? 'Loading…' : 'Load older messages'}</button>}
               {messages.map((message) => <MessageCard key={message.id} message={message} />)}
-              {status === 'sending' && <div className="thinking" role="status"><span className="spinner" /> Thinking…</div>}
+              {status === 'sending' && <div className="thinking" role="status"><span className="spinner" /> Preparing and delivering answer…</div>}
             </div>
           )}
         </div>

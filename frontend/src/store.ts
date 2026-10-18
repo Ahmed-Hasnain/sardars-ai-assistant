@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  ApiError, currentUser, getConversation, listConversations, login, logout, sendMessage,
+  ApiError, currentUser, getConversation, listConversations, login, logout, streamMessage,
   type ConversationSummary, type HistoryMessage, type Source, type User,
 } from './api'
 import {
@@ -45,7 +45,7 @@ type ChatStore = {
 let selectionEpoch = 0
 
 function historyMessages(rows: HistoryMessage[]): Message[] {
-  return rows.map((row) => ({ id: String(row.id), role: row.role, text: row.content, sources: [] }))
+  return rows.map((row) => ({ id: String(row.id), role: row.role, text: row.content, sources: row.sources ?? [] }))
 }
 
 function clearAuth(set: (values: Partial<ChatStore>) => void, message: string | null): void {
@@ -211,27 +211,48 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (!token || !message || status !== 'idle' || conversationLoading) return
 
     const userMessage: Message = { id: crypto.randomUUID(), role: 'user', text: message, sources: [] }
-    set((state) => ({ status: 'sending', error: null, messages: [...state.messages, userMessage] }))
+    const assistantMessage: Message = { id: crypto.randomUUID(), role: 'assistant', text: '', sources: [] }
+    let startedId: string | null = null
+    set((state) => ({ status: 'sending', error: null, messages: [...state.messages, userMessage, assistantMessage] }))
     try {
-      const reply = await sendMessage(token, message, conversationId)
+      const reply = await streamMessage(token, message, conversationId, (id) => {
+        startedId = id
+        if (id && get().token === token) {
+          saveActiveConversation(id)
+          set({ conversationId: id })
+        }
+      }, (chunk) => {
+        if (get().token !== token) return
+        set((state) => ({ messages: state.messages.map((item) => item.id === assistantMessage.id
+          ? { ...item, text: item.text + chunk } : item) }))
+      })
       if (get().token !== token) return
       const nextId = reply.conversation_id ?? conversationId
       if (nextId) saveActiveConversation(nextId)
       set((state) => ({
         status: 'idle', conversationId: nextId,
-        messages: [...state.messages, {
-          id: crypto.randomUUID(), role: 'assistant', text: reply.answer, sources: reply.sources,
-        }],
+        messages: state.messages.map((item) => item.id === assistantMessage.id
+          ? { ...item, text: reply.answer, sources: reply.sources } : item),
       }))
       void get().loadConversations()
     } catch (error) {
       if (get().token !== token) return
       if (error instanceof ApiError && error.status === 401) clearAuth(set, error.message)
-      else set((state) => ({
-        status: 'idle',
-        messages: state.messages.filter((item) => item.id !== userMessage.id),
-        error: error instanceof Error ? error.message : 'Could not send your message.',
-      }))
+      else {
+        set((state) => ({
+          status: 'idle',
+          messages: state.messages.filter((item) => item.id !== userMessage.id && item.id !== assistantMessage.id),
+          error: error instanceof Error ? error.message : 'Could not send your message.',
+        }))
+        const recoverId = startedId ?? (error instanceof ApiError && error.status > 0 ? null : conversationId)
+        if (recoverId) {
+          await get().openConversation(recoverId)
+          if (get().token === token && get().conversationId === recoverId && !get().conversationLoading) {
+            set({ error: 'The connection was interrupted. This conversation was reloaded; check the latest message before retrying.' })
+          }
+          void get().loadConversations()
+        }
+      }
     }
   },
 }))

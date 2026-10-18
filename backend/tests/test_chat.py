@@ -34,6 +34,37 @@ def test_chat_returns_unverified_answer() -> None:
     assert mock_chat.await_args.args[0][-1]["content"] == "Hello"
 
 
+def test_stream_sends_complete_checked_answer_and_metadata() -> None:
+    result = ChatResult("A mixer controls water flow. " * 8, "test-model", 5, 30, 10.0)
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, return_value=result):
+        response = client.post("/api/v1/chat/stream", json={"message": "What is a mixer?"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    events = [part for part in response.text.split("\n\n") if part]
+    assert events[0].startswith("event: start\n")
+    assert sum(part.startswith("event: chunk\n") for part in events) > 1
+    assert events[-1].startswith("event: complete\n")
+    import json
+    payload = json.loads(events[-1].split("data: ", 1)[1])
+    assert payload["answer"] == result.text
+    assert payload["route"] == "general"
+
+
+def test_stream_never_sends_unverified_claim_or_partial_error() -> None:
+    result = ChatResult("Sardars guarantees delivery tomorrow.", "test-model", 5, 7, 10.0)
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, return_value=result):
+        response = client.post("/api/v1/chat/stream", json={"message": "What is a mixer?"})
+    assert response.status_code == 200
+    assert "guarantees delivery" not in response.text
+
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, side_effect=ModelError("private")):
+        failed = client.post("/api/v1/chat/stream", json={"message": "What is a mixer?"})
+    assert failed.status_code == 503
+    assert failed.headers["content-type"].startswith("application/json")
+    assert "private" not in failed.text
+
+
 def test_chat_rejects_blank_message() -> None:
     response = client.post("/api/v1/chat", json={"message": "   "})
     assert response.status_code == 422

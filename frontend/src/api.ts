@@ -33,6 +33,7 @@ export type HistoryMessage = {
   id: number
   role: 'user' | 'assistant'
   content: string
+  sources?: Source[]
 }
 
 export type ConversationPage = {
@@ -46,6 +47,18 @@ export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message)
   }
+}
+
+function errorForStatus(status: number, path: string): ApiError {
+  const messages: Record<number, string> = {
+    401: path === '/auth/login' ? 'Invalid email or password.' : 'Your session has expired. Please sign in again.',
+    404: 'This conversation is no longer available.',
+    409: 'This conversation changed. Please retry your message.',
+    429: 'Too many requests. Please wait a moment and retry.',
+    503: 'The answer service is temporarily unavailable. Please retry.',
+    504: 'The answer took too long. Please retry.',
+  }
+  return new ApiError(status, messages[status] ?? `Request failed (${status}).`)
 }
 
 async function request<T>(path: string, options: RequestInit, token?: string): Promise<T> {
@@ -63,15 +76,7 @@ async function request<T>(path: string, options: RequestInit, token?: string): P
   }
 
   if (!response.ok) {
-    const messages: Record<number, string> = {
-      401: path === '/auth/login' ? 'Invalid email or password.' : 'Your session has expired. Please sign in again.',
-      404: 'This conversation is no longer available.',
-      409: 'This conversation changed. Please retry your message.',
-      429: 'Too many requests. Please wait a moment and retry.',
-      503: 'The answer service is temporarily unavailable. Please retry.',
-      504: 'The answer took too long. Please retry.',
-    }
-    throw new ApiError(response.status, messages[response.status] ?? `Request failed (${response.status}).`)
+    throw errorForStatus(response.status, path)
   }
 
   if (response.status === 204) return undefined as T
@@ -109,4 +114,97 @@ export function sendMessage(token: string, message: string, conversationId: stri
     method: 'POST',
     body: JSON.stringify({ message, ...(conversationId ? { conversation_id: conversationId } : {}) }),
   }, token)
+}
+
+export async function streamMessage(
+  token: string, message: string, conversationId: string | null,
+  onStart: (id: string | null) => void, onChunk: (text: string) => void,
+): Promise<ChatReply> {
+  let response: Response
+  try {
+    response = await fetch('/api/v1/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ message, ...(conversationId ? { conversation_id: conversationId } : {}) }),
+    })
+  } catch {
+    throw new ApiError(0, 'Could not reach the assistant. Check that the API is running.')
+  }
+  if (!response.ok) throw errorForStatus(response.status, '/chat/stream')
+  if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
+    throw new ApiError(0, 'The answer stream was unavailable. Please retry.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let complete: ChatReply | null = null
+  let received = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n')
+      if (buffer.length > 100_000) throw new ApiError(0, 'The answer stream exceeded its limit.')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const kind = frame.match(/^event: ([a-z]+)$/m)?.[1]
+        const raw = frame.match(/^data: (.*)$/m)?.[1]
+        if (kind && raw) {
+          let data: unknown
+          try { data = JSON.parse(raw) } catch { throw new ApiError(0, 'The answer stream was invalid.') }
+          if (!data || typeof data !== 'object') throw new ApiError(0, 'The answer stream was invalid.')
+          const item = data as Record<string, unknown>
+          if (kind === 'start') onStart(typeof item.conversation_id === 'string' ? item.conversation_id : null)
+          if (kind === 'chunk') {
+            if (typeof item.text !== 'string') throw new ApiError(0, 'The answer stream was invalid.')
+            received += item.text
+            if (received.length > 50_000) throw new ApiError(0, 'The answer stream exceeded its limit.')
+            onChunk(item.text)
+          }
+          if (kind === 'complete') {
+            if (typeof item.answer !== 'string' || item.answer !== received || !Array.isArray(item.sources)) {
+              throw new ApiError(0, 'The answer stream was invalid.')
+            }
+            complete = item as ChatReply
+          }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    throw new ApiError(0, 'The connection ended before the answer completed. Open this conversation to check whether it was saved.')
+  } finally {
+    reader.releaseLock()
+  }
+  if (!complete) throw new ApiError(0, 'The connection ended before the answer completed. Open this conversation to check whether it was saved.')
+  return complete
+}
+
+export function isFileSourceUrl(url: string): boolean {
+  return /^\/api\/v1\/ingestion\/files\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(url)
+}
+
+export async function downloadSource(token: string, source: Source): Promise<void> {
+  if (!isFileSourceUrl(source.url)) throw new ApiError(0, 'This source link is invalid.')
+  let response: Response
+  try {
+    response = await fetch(source.url, { headers: { Authorization: `Bearer ${token}` } })
+  } catch {
+    throw new ApiError(0, 'Could not reach the source file.')
+  }
+  if (!response.ok) throw errorForStatus(response.status, '/source')
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = source.title.replace(/[\\/]/g, '_').slice(0, 120) || 'source'
+    link.click()
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
 }
