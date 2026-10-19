@@ -1,0 +1,4 @@
+# Use only on a host with NVIDIA Container Toolkit configured for Docker.
+services:
+  ollama:
+    gpus: all

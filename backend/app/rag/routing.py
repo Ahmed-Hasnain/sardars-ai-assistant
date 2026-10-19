@@ -25,6 +25,12 @@ GENERAL_CONCEPT = re.compile(
     re.I,
 )
 PRODUCT_EDUCATION = re.compile(r"\b(?:basin|mixer|faucet|tap|toilet|shower|sink|bath|vanity|tile|flush|plumbing)\b", re.I)
+PRODUCT_DEFINITION = re.compile(
+    r"^(?:ok(?:ay)?[, ]+)?(?:tell me\s+)?(?:what is|define|explain)\s+"
+    r"(?:a[n]?\s+)?(?:thermostatic\s+)?(?:shower\s+|basin\s+)?"
+    r"(?:mixer|faucet|tap|toilet|shower|sink|bath|vanity|tile|flush)\s*\??$",
+    re.I,
+)
 HEALTH_TOPIC = re.compile(
     r"\b(?:conception|conceiv(?:e|ing)|fertility|infertility|pregnan\w*|"
     r"ovulat\w*|reproduct\w*|intercourse|sex(?:ual)?|birth control|contraception|"
@@ -55,7 +61,8 @@ ACTION_REQUEST = re.compile(
 )
 UNRELATED = re.compile(
     r"\b(?:tell me a joke|write (?:python )?code|write a poem|weather|capital of|"
-    r"solve (?:this |an? )?(?:equation|math problem))\b", re.I,
+    r"solve (?:this |an? )?(?:equation|math problem)|"
+    r"how many countries (?:are there |are |exist )?(?:in the world|worldwide))\b", re.I,
 )
 
 
@@ -69,9 +76,13 @@ def scope_question(question: str, *, has_product_context: bool = False) -> Quest
         return "health"
     if ACTION_REQUEST.search(text):
         return "unsupported_action"
+    if UNRELATED.search(text) and not PRODUCT_EDUCATION.search(text) and not COMPANY_IDENTITY.search(text):
+        return "unrelated"
     if has_product_context:
         return "company"
     if GENERAL_CONCEPT.fullmatch(text):
+        return "general"
+    if PRODUCT_DEFINITION.fullmatch(text):
         return "general"
     if COMPANY_IDENTITY.search(text):
         if (not COMPANY_POSSESSIVE.search(text) and GENERAL_EDUCATION.match(text)
@@ -82,8 +93,6 @@ def scope_question(question: str, *, has_product_context: bool = False) -> Quest
         return "general"
     if GENERAL_EDUCATION.match(text) and not COMPANY_FACT.search(text):
         return "general"
-    if UNRELATED.search(text) and not PRODUCT_EDUCATION.search(text):
-        return "unrelated"
     return "company"
 
 

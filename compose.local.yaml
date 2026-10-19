@@ -1,0 +1,116 @@
+# Isolated E1 development stack. Does not use compose.yaml's existing data volumes.
+name: sardars-e1
+
+x-app-env: &app-env
+  SARDARS_DB_HOST: db
+  SARDARS_DB_PORT: "5432"
+  SARDARS_QDRANT_BASE_URL: http://qdrant:6333
+  SARDARS_OLLAMA_BASE_URL: http://ollama:11434
+  SARDARS_INGESTION_STORAGE_DIR: /app/data/uploads
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${SARDARS_DB_USER:?Set SARDARS_DB_USER in .env}
+      POSTGRES_DB: ${SARDARS_DB_NAME:?Set SARDARS_DB_NAME in .env}
+      POSTGRES_PASSWORD: ${SARDARS_DB_PASSWORD:?Set SARDARS_DB_PASSWORD in .env}
+    volumes:
+      - e1_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.2
+    volumes:
+      - e1_qdrant_data:/qdrant/storage
+
+  vector_init:
+    image: sardars-e1-api
+    env_file: .env
+    environment: *app-env
+    command: ["python", "-m", "app.retrieval.init_collection"]
+    depends_on:
+      qdrant:
+        condition: service_started
+    restart: "no"
+
+  ollama:
+    image: ollama/ollama:0.12.6
+    volumes:
+      - e1_ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  models:
+    image: ollama/ollama:0.12.6
+    entrypoint: ["/bin/sh", "/model-init/ensure-models.sh"]
+    volumes:
+      - ./docker/ensure-models.sh:/model-init/ensure-models.sh:ro
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      SARDARS_OLLAMA_MODEL: ${SARDARS_OLLAMA_MODEL:-qwen3:0.6b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  migrate:
+    image: sardars-e1-api
+    env_file: .env
+    environment: *app-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: .env
+    environment: *app-env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - e1_uploads:/app/data/uploads
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      vector_init:
+        condition: service_completed_successfully
+      models:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    ports:
+      - "127.0.0.1:15173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  e1_postgres_data:
+  e1_qdrant_data:
+  e1_ollama_data:
+  e1_uploads:

@@ -1,7 +1,7 @@
 # Sardars AI Assistant — extended plan
 
 Last reviewed: 2026-10-19
-Status: active roadmap; no extended checkpoint has been completed
+Status: active roadmap; E1 local containerization in progress, first isolated startup checkpoint verified; E1 exit remains open
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
@@ -19,7 +19,7 @@ Across every checkpoint: keep self-hosted inference; preserve authentication, ap
 
 Goal: run the existing application reproducibly on one development machine without publishing it.
 
-- [ ] Add pinned, buildable API and frontend images and a local Compose workflow for API, frontend, PostgreSQL, Qdrant and Ollama. Preserve data/model volumes and allow an existing Ollama host-service option if local hardware makes that preferable.
+- [ ] Add pinned, buildable API and frontend images and a local Compose workflow for API, frontend, PostgreSQL, Qdrant and containerized Ollama by default. Preserve data/model volumes; offer an optional NVIDIA GPU override for compatible hosts.
 - [ ] Configure service-name networking, health/readiness checks, startup and migration commands, secrets from local environment rather than images, and localhost-only user-facing ports. Keep database, vector and inference services private to the Compose network by default.
 - [ ] Document initial model pulls, first admin creation, startup, shutdown, updates and safe backup/restore of local volumes. Existing developer data must survive normal restarts and image rebuilds.
 - [ ] Verify a clean-volume start and a restart with retained data; run authenticated chat, product lookup, authorized retrieval, frontend login and the relevant backend/frontend checks. Compare basic latency with the current host setup before deciding whether to retire `scripts/dev.sh`.

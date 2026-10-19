@@ -1,0 +1,13 @@
+.git
+.env
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+frontend/dist
+data
+docs
+.agents
+.aws
+.codex
