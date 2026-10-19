@@ -65,7 +65,9 @@ The original optional Ollama image pull was started but stopped because this pin
 
 ## Verification still needed for the E1 exit
 
-- Pull and run the pinned Ollama image and both models through the default Compose startup, create a temporary admin, and verify authenticated general chat and a controlled upload/retrieval/citation flow.
+The developer has deferred these data-backed checks until after E4's account registration and source-ingestion journey. E2 can proceed on the retained original evaluation corpus and workflow; the empty isolated E1 index must not be used as an equivalent E2 baseline. This is not E1 completion. Do not copy or clear the existing corpus merely to make this new stack appear populated.
+
+- Complete the authenticated general-chat and controlled upload/retrieval/citation flow in the isolated stack; image/model pulls and a signed-in safe-abstention browser path have already been observed.
 - Verify product lookup against controlled rows in the isolated database; empty catalog answers alone are insufficient.
 - Restart every service and verify login, data, model files, upload originals and vector points persist.
 - Compare the basic chat/retrieval latency with the existing host workflow, including CPU and any available GPU machine.
