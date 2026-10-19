@@ -3,16 +3,44 @@
 from hashlib import sha256
 import json
 from typing import Literal, Self
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.ingestion.prepare_site import prepare_chunks
 from app.ingestion.public_site import source_type
 from app.ingestion.site_documents import WebsiteDocument
-from app.ingestion.documents import SuppliedDocument, file_url, valid_web_url
+from app.ingestion.documents import SuppliedDocument, file_url, valid_source, valid_web_url
 
 MAX_JOB_BYTES = 3 * 1024 * 1024
+
+
+class StagedSource(BaseModel):
+    """A bounded, durable reference; extraction happens in the worker."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    url: str = Field(min_length=1, max_length=2048)
+    source_type: Literal["pdf", "text", "markdown", "web", "pages", "articles", "products"]
+    visibility: Literal["public", "staff", "admin"]
+    title: str = Field(min_length=1, max_length=500)
+    original_filename: str = Field(min_length=1, max_length=200)
+    media_type: Literal["application/pdf", "text/plain", "text/markdown", "text/html"]
+    storage_key: UUID | None = None
+    file_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def check_staging(self) -> Self:
+        is_file = file_url(self.url)
+        if (not valid_source(self.url, self.source_type)
+            or any(ord(char) < 32 for char in self.title + self.original_filename)
+            or "/" in self.original_filename or "\\" in self.original_filename
+            or (is_file and (self.storage_key is None or self.file_sha256 is None))
+            or (not is_file and (self.storage_key is not None or self.file_sha256 is not None))):
+            raise ValueError("Invalid staged source")
+        expected = {"pdf": "application/pdf", "text": "text/plain", "markdown": "text/markdown"}.get(self.source_type, "text/html")
+        if self.media_type != expected:
+            raise ValueError("Staged source format does not match media type")
+        return self
 
 
 class JobRequest(BaseModel):
@@ -21,15 +49,18 @@ class JobRequest(BaseModel):
     scope: Literal["public_site", "internal"] = "public_site"
     documents: list[WebsiteDocument | SuppliedDocument] = Field(default_factory=list, max_length=10)
     urls: list[str] = Field(default_factory=list, max_length=10)
+    staged: StagedSource | None = None
 
     @model_validator(mode="after")
     def check_request(self) -> Self:
         if self.operation == "import":
-            if not self.documents or self.urls:
-                raise ValueError("Import requires document snapshots only")
-            urls = [document.url for document in self.documents]
+            if bool(self.documents) == bool(self.staged) or self.urls:
+                raise ValueError("Import requires either document snapshots or one staged source")
+            if self.staged and self.scope != "internal":
+                raise ValueError("Only internal imports may stage a source")
+            urls = [self.staged.url] if self.staged else [document.url for document in self.documents]
         else:
-            if not self.urls or self.documents:
+            if not self.urls or self.documents or self.staged:
                 raise ValueError("Removal requires explicit URLs only")
             urls = self.urls
         if self.scope == "public_site" and any(not isinstance(doc, WebsiteDocument) for doc in self.documents):
@@ -43,12 +74,18 @@ class JobRequest(BaseModel):
 
     def snapshot(self) -> dict:
         value = self.model_dump(mode="json")
+        if value["staged"] is None:
+            # Keep saved pre-E3 job snapshots byte-for-byte compatible with
+            # idempotent CLI replay using an existing job ID.
+            del value["staged"]
         if len(json.dumps(value, ensure_ascii=False).encode()) > MAX_JOB_BYTES:
             raise ValueError("Job snapshot exceeds the size limit")
         return value
 
     def source_urls(self) -> list[str]:
-        return self.urls if self.operation == "remove" else [document.url for document in self.documents]
+        if self.operation == "remove":
+            return self.urls
+        return [self.staged.url] if self.staged else [document.url for document in self.documents]
 
 
 def source_id(url: str) -> str:

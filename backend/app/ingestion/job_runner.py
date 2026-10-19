@@ -7,7 +7,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from pydantic import ValidationError
 
+from app.ingestion.extraction import ExtractionError
 from app.ingestion.job_store import claim, fail
+from app.ingestion.materialize import materialize
 from app.ingestion.site_index import IndexingError, WebsiteIndexer
 from app.ingestion.sync_sources import process
 
@@ -25,9 +27,12 @@ def run_job(sessions: sessionmaker[Session], job_id: str, indexer: WebsiteIndexe
     run = claim(sessions, job_id, indexer.settings.import_timeout_seconds, retry=retry)
     logger.info("ingestion_started job_id=%s attempt=%s operation=%s", job_id, run.attempt, run.request.operation)
     try:
+        run = materialize(sessions, run, indexer.settings)
         result = process(sessions, run, indexer)
     except Exception as exc:
-        if isinstance(exc, ValidationError):
+        if isinstance(exc, ExtractionError):
+            code, message = "extraction_error", str(exc)
+        elif isinstance(exc, ValidationError):
             code, message = "invalid_input", "Invalid stored source snapshot"
         elif isinstance(exc, SQLAlchemyError):
             code, message = "database_error", "Database unavailable during ingestion"

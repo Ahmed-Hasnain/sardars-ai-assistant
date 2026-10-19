@@ -7,6 +7,7 @@ x-app-env: &app-env
   SARDARS_QDRANT_BASE_URL: http://qdrant:6333
   SARDARS_OLLAMA_BASE_URL: http://ollama:11434
   SARDARS_INGESTION_STORAGE_DIR: /app/data/uploads
+  SARDARS_INGESTION_RUNNER: worker
 
 services:
   db:
@@ -100,6 +101,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  worker:
+    image: sardars-e1-api
+    env_file: .env
+    environment: *app-env
+    command: ["python", "-m", "app.ingestion.worker"]
+    volumes:
+      - e1_uploads:/app/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      vector_init:
+        condition: service_completed_successfully
+      models:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   web:

@@ -13,9 +13,10 @@ from app.db.models import IngestionJob, SourceRegistration, User
 from app.ingestion.access import can_manage, can_read, check_submission
 from app.ingestion.documents import FILE_PREFIX, SuppliedDocument, file_url
 from app.ingestion.extraction import extract_file, extract_url, file_format, storage_path, store_original
-from app.ingestion.job_requests import JobRequest, source_id
+from app.ingestion.extract_worker import MAX_FILE_BYTES
+from app.ingestion.job_requests import JobRequest, StagedSource, source_id
 from app.ingestion.job_runner import JobFailed, run_job
-from app.ingestion.job_store import enqueue, now
+from app.ingestion.job_store import enqueue, now, requeue
 from app.ingestion.public_site import source_type
 from app.ingestion.site_index import WebsiteIndexer
 from app.schemas.ingestion import FileSubmission, URLSubmission
@@ -77,6 +78,8 @@ def submit(sessions: sessionmaker[Session], settings: Settings, user_id: int, *,
 
 def upload(sessions: sessionmaker[Session], settings: Settings, user_id: int, raw: bytes,
            filename: str, metadata: FileSubmission) -> dict:
+    if not raw or len(raw) > MAX_FILE_BYTES:
+        raise HTTPException(413 if raw else 400, "File must contain between 1 byte and 5 MiB")
     kind, media_type = file_format(filename)
     url = FILE_PREFIX + str(uuid4())
     if metadata.source_id:
@@ -86,6 +89,18 @@ def upload(sessions: sessionmaker[Session], settings: Settings, user_id: int, ra
                 raise HTTPException(409, "Only an uploaded source can be updated with a file")
             url = source.url
     preflight(sessions, user_id, url, metadata.visibility, kind)
+    if settings.ingestion_runner == "worker":
+        key, checksum = store_original(settings, raw)
+        try:
+            staged = StagedSource(url=url, source_type=kind, visibility=metadata.visibility,
+                                  title=metadata.title or filename, original_filename=filename,
+                                  media_type=media_type, storage_key=key, file_sha256=checksum)
+            job_id = enqueue(sessions, JobRequest(operation="import", scope="internal", staged=staged),
+                             submitted_by_user_id=user_id)
+        except BaseException:
+            storage_path(settings, key).unlink(missing_ok=True)
+            raise
+        return {"job_id": job_id, "status": "pending"}
     text = extract_file(raw, kind)
     return submit(sessions, settings, user_id, raw=raw, text=text, title=metadata.title or filename,
                   url=url, kind=kind, visibility=metadata.visibility, filename=filename, media_type=media_type)
@@ -99,6 +114,13 @@ def import_url(sessions: sessionmaker[Session], settings: Settings, user_id: int
         raise HTTPException(400, "Select a descriptive Sardars page, article, or product URL")
     kind = source_type(submission.url) or "web"
     preflight(sessions, user_id, submission.url, submission.visibility, kind)
+    if settings.ingestion_runner == "worker":
+        staged = StagedSource(url=submission.url, source_type=kind, visibility=submission.visibility,
+                              title="Pending URL", original_filename="page.html",
+                              media_type="text/html")
+        job_id = enqueue(sessions, JobRequest(operation="import", scope="internal", staged=staged),
+                         submitted_by_user_id=user_id)
+        return {"job_id": job_id, "status": "pending"}
     raw, title, text = extract_url(submission.url, settings)
     return submit(sessions, settings, user_id, raw=raw, text=text, title=title, url=submission.url,
                   kind=kind, visibility=submission.visibility, filename="page.html", media_type="text/html")
@@ -118,7 +140,8 @@ def accessible_job(db: Session, user: User, job_id: str) -> IngestionJob:
     for url in request.source_urls():
         source = db.get(SourceRegistration, source_id(url))
         if (source and not can_read(user, source)) or (user.role != "admin" and any(
-            doc.visibility == "admin" for doc in request.documents)):
+            doc.visibility == "admin" for doc in request.documents)) or (
+            user.role != "admin" and request.staged is not None and request.staged.visibility == "admin"):
             raise HTTPException(404, "Job not found")
     return job
 
@@ -139,6 +162,12 @@ def retry(sessions: sessionmaker[Session], settings: Settings, user_id: int, job
                 raise HTTPException(404, "Job not found")
         if request.scope != "internal":
             raise HTTPException(409, "Use the local CLI to retry local-operator jobs")
+    if settings.ingestion_runner == "worker":
+        try:
+            requeue(sessions, job_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"job_id": job_id, "status": "pending"}
     return execute(sessions, settings, job_id, retry=True)
 
 
@@ -147,6 +176,13 @@ def remove(sessions: sessionmaker[Session], settings: Settings, user_id: int, id
         source = manageable(db, load_user(db, user_id), identity)
         url = source.url
     job_id = enqueue(sessions, JobRequest(operation="remove", scope="internal", urls=[url]), submitted_by_user_id=user_id)
+    if settings.ingestion_runner == "worker":
+        with sessions.begin() as db:
+            source = manageable(db, load_user(db, user_id), identity)
+            source.is_active = False
+            source.index_status = "removed"
+            source.index_job_id = job_id
+        return {"job_id": job_id, "status": "pending"}
     return execute(sessions, settings, job_id)
 
 

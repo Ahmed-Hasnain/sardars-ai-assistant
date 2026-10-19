@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import IngestionJob, SourceRegistration
@@ -125,6 +125,29 @@ def fail(sessions: sessionmaker[Session], run: JobRun, code: str, message: str) 
         for source in db.scalars(select(SourceRegistration).where(SourceRegistration.index_job_id == run.id).with_for_update()):
             if source.index_status == "indexing":
                 source.index_status = "failed"
+
+
+def requeue(sessions: sessionmaker[Session], job_id: str) -> None:
+    """Explicitly retry a failed job without changing its saved input."""
+    with transaction(sessions) as db:
+        job = db.scalar(select(IngestionJob).where(IngestionJob.id == job_id).with_for_update())
+        if job is None or job.attempts >= MAX_ATTEMPTS:
+            raise ValueError("Job not found or retry limit reached")
+        expired = job.status == "processing" and job.lease_expires_at and utc(job.lease_expires_at) <= now()
+        if job.status != "failed" and not expired:
+            raise ValueError("Only failed or expired jobs can be retried")
+        job.status, job.run_token, job.lease_expires_at = "pending", None, None
+        job.error_code, job.error_message, job.finished_at = None, None, None
+
+
+def next_job(sessions: sessionmaker[Session]) -> tuple[str, bool] | None:
+    """Read the oldest runnable ID; claim() remains the concurrency fence."""
+    with sessions() as db:
+        job = db.scalar(select(IngestionJob).where(or_(
+            IngestionJob.status == "pending",
+            (IngestionJob.status == "processing") & (IngestionJob.lease_expires_at <= now()),
+        )).order_by(IngestionJob.created_at, IngestionJob.id).limit(1))
+        return (job.id, job.status == "processing") if job else None
 
 
 def job_view(job: IngestionJob) -> dict:

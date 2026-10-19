@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -43,6 +44,8 @@ _processing_slot = threading.BoundedSemaphore(1)
 
 
 def process_submission(function, sessions, settings, user_id, args):
+    if settings.ingestion_runner == "worker":
+        return function(sessions, settings, user_id, *args)
     # One active ingestion request per API process avoids concurrent bounded
     # parser processes exhausting a small local machine. Do not build a queue.
     if not _processing_slot.acquire(blocking=False):
@@ -55,7 +58,8 @@ def process_submission(function, sessions, settings, user_id, args):
 
 async def call(function, db: Session, settings: Settings, user: User, *args) -> dict:
     try:
-        return await run_in_threadpool(process_submission, function, sessionmaker(bind=db.get_bind()), settings, user.id, args)
+        result = await run_in_threadpool(process_submission, function, sessionmaker(bind=db.get_bind()), settings, user.id, args)
+        return JSONResponse(status_code=202, content=result) if result.get("status") == "pending" else result
     except ExtractionError as exc:
         raise HTTPException(400, str(exc)) from exc
     except ValidationError as exc:

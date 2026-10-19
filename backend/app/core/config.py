@@ -35,3 +35,4 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=2, ge=1, le=8)
     ingestion_storage_dir: Path = Path("data/uploads")
     ingestion_url_hosts: list[str] = ["sardarandco.com"]
+    ingestion_runner: Literal["inline", "worker"] = "inline"
