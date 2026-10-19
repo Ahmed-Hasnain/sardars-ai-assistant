@@ -1,7 +1,7 @@
 # Sardars AI Assistant — extended plan
 
 Last reviewed: 2026-10-19
-Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 and E3 complete on current laptop; E4 is next
+Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 and E3 complete on current laptop; E4 admin upload/sitemap workflow implemented, real-data acceptance open
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
@@ -64,6 +64,8 @@ Goal: let an existing admin submit Sardars company data through the browser, hav
 - [ ] For any requested fresh-start exercise, first inventory and back up RAG tables, originals and Qdrant; write a reversible, exact reset scope and verify restore before clearing data. Preserve users, conversations and authoritative products unless explicitly included in an approved reset.
 
 Exit: an existing admin can submit supported files, individual URLs and a bounded sitemap through the browser, observe worker completion, and retrieve only visible indexed sources; failures, revocation and updates behave correctly. Before/after evaluation shows where the new data improved answers and what still fails. Registration and account approval are outside this exit.
+
+E4 implementation checkpoint (2026-10-19): the admin browser workflow, worker-backed sitemap parent/child jobs, bounded discovery, progress and retry are implemented and covered by backend/frontend/mocked-browser tests. The isolated stack was rebuilt and checked with its existing 4,983 products intact and no new RAG sources. The checklist and E4 exit remain open for the developer's real Sardars files/site, live credentialed ingestion, source/answer inspection and before/after evaluation. See `docs/e4_admin_ingestion_checkpoint.md`.
 
 After this exit, finish and record the deferred E1 data-backed checks above. Do not infer E1 completion from E4's UI or job status alone.
 

@@ -16,7 +16,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.requests import Request as StarletteRequest
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_admin
+from app.api.rate_limits import SITEMAP_LIMITER, enforce_limit
 from app.api.request_limits import bounded_body
 from app.core.config import Settings
 from app.db.models import IngestionJob, SourceRegistration, User
@@ -26,13 +27,15 @@ from app.ingestion.documents import FILE_PREFIX
 from app.ingestion.extraction import ExtractionError, storage_path
 from app.ingestion.extract_worker import MAX_FILE_BYTES
 from app.ingestion.job_store import job_view
+from app.ingestion.job_requests import JobRequest
 from app.retrieval.authorization import ALLOWED_VISIBILITIES
-from app.schemas.ingestion import FileSubmission, URLSubmission
+from app.schemas.ingestion import FileSubmission, URLSubmission, SitemapSubmission
 from app.services import ingestion as service
 
 router = APIRouter(prefix="/api/v1/ingestion", tags=["ingestion"])
 DB = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+AdminUser = Annotated[User, Depends(require_admin)]
 
 
 def get_settings() -> Settings:
@@ -82,6 +85,21 @@ async def import_url(request: Request, user: CurrentUser, db: DB, settings: Conf
     return await call(service.import_url, db, settings, user, submission)
 
 
+@router.post("/sitemaps", openapi_extra={"requestBody": {"required": True, "content": {
+    "application/json": {"schema": SitemapSubmission.model_json_schema()}
+}}})
+async def submit_sitemap(request: Request, user: AdminUser, db: DB, settings: Config) -> dict:
+    enforce_limit(SITEMAP_LIMITER, user.id)
+    try:
+        raw = await bounded_body(request, 4096)
+        submission = SitemapSubmission.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(422, "Invalid sitemap submission") from exc
+    except TimeoutError as exc:
+        raise HTTPException(408, "Request body timed out") from exc
+    return await call(service.submit_sitemap, db, settings, user, submission)
+
+
 @router.post("/files", openapi_extra={"requestBody": {"required": True, "content": {
     "multipart/form-data": {"schema": {"type": "object", "required": ["file"], "properties": {
         "file": {"type": "string", "format": "binary"}, **FileSubmission.model_json_schema()["properties"],
@@ -124,7 +142,7 @@ async def upload(request: Request, user: CurrentUser, db: DB, settings: Config) 
 
 @router.get("/jobs")
 def jobs(user: CurrentUser, db: DB, limit: int = Query(10, ge=1, le=50)) -> list[dict]:
-    query = select(IngestionJob).order_by(IngestionJob.created_at.desc(), IngestionJob.id).limit(limit)
+    query = select(IngestionJob).where(IngestionJob.parent_job_id.is_(None)).order_by(IngestionJob.created_at.desc(), IngestionJob.id).limit(limit)
     if user.role != "admin":
         query = query.where(IngestionJob.submitted_by_user_id == user.id)
     result = []
@@ -138,7 +156,26 @@ def jobs(user: CurrentUser, db: DB, limit: int = Query(10, ge=1, le=50)) -> list
 
 @router.get("/jobs/{job_id}")
 def job(job_id: UUID, user: CurrentUser, db: DB) -> dict:
-    return job_view(service.accessible_job(db, user, str(job_id)))
+    record = service.accessible_job(db, user, str(job_id))
+    result = job_view(record)
+    if record.operation == "crawl":
+        result["crawl_progress"] = service.crawl_progress(db, record)
+    return result
+
+
+@router.get("/jobs/{job_id}/pages")
+def crawl_pages(job_id: UUID, user: AdminUser, db: DB, limit: int = Query(50, ge=1, le=100),
+                offset: int = Query(0, ge=0, le=1500)) -> list[dict]:
+    parent = service.accessible_job(db, user, str(job_id))
+    if parent.operation != "crawl":
+        raise HTTPException(404, "Sitemap job not found")
+    children = db.scalars(select(IngestionJob).where(IngestionJob.parent_job_id == str(job_id))
+                          .order_by(IngestionJob.created_at, IngestionJob.id).offset(offset).limit(limit))
+    result = []
+    for child in children:
+        request = JobRequest.model_validate(child.request)
+        result.append({**job_view(child), "url": request.source_urls()[0]})
+    return result
 
 
 @router.post("/jobs/{job_id}/retry")

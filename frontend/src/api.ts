@@ -208,3 +208,90 @@ export async function downloadSource(token: string, source: Source): Promise<voi
     URL.revokeObjectURL(objectUrl)
   }
 }
+
+export type IngestionJob = {
+  job_id: string
+  operation: 'import' | 'remove' | 'crawl'
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  parent_job_id: string | null
+  attempts: number
+  max_attempts: number
+  error: string | null
+  result: Record<string, unknown> | null
+  crawl_progress?: { discovered_pages: number | null; queued_pages: number; pending: number; processing: number; completed: number; failed: number }
+  url?: string
+}
+
+export type IngestedSource = {
+  source_id: string
+  title: string | null
+  url: string
+  source_type: string
+  visibility: 'public' | 'staff' | 'admin'
+  active: boolean
+  index_status: string
+  job_id: string | null
+}
+
+async function ingestionRequest<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`/api/v1/ingestion${path}`, {
+      ...options,
+      headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        Authorization: `Bearer ${token}`, ...(options.headers ?? {}) },
+    })
+  } catch {
+    throw new ApiError(0, 'Could not reach the ingestion service.')
+  }
+  if (!response.ok) {
+    let detail = ''
+    try {
+      const body = await response.json() as { detail?: unknown }
+      if (typeof body.detail === 'string') detail = body.detail.slice(0, 250)
+    } catch { /* Return a safe generic error for invalid server responses. */ }
+    throw new ApiError(response.status, detail || `Ingestion request failed (${response.status}).`)
+  }
+  return response.json() as Promise<T>
+}
+
+export function listIngestionJobs(token: string): Promise<IngestionJob[]> {
+  return ingestionRequest(token, '/jobs?limit=50')
+}
+
+export function getIngestionJob(token: string, id: string): Promise<IngestionJob> {
+  return ingestionRequest(token, `/jobs/${encodeURIComponent(id)}`)
+}
+
+export function listCrawlPages(token: string, id: string, offset = 0): Promise<IngestionJob[]> {
+  return ingestionRequest(token, `/jobs/${encodeURIComponent(id)}/pages?limit=50&offset=${offset}`)
+}
+
+export function listIngestedSources(token: string, offset = 0): Promise<IngestedSource[]> {
+  return ingestionRequest(token, `/sources?limit=100&offset=${offset}`)
+}
+
+export function submitIngestionFile(token: string, file: File, visibility: 'staff' | 'admin', title: string, sourceId?: string): Promise<IngestionJob> {
+  const data = new FormData()
+  data.set('file', file)
+  data.set('visibility', visibility)
+  if (title.trim()) data.set('title', title.trim())
+  if (sourceId) data.set('source_id', sourceId)
+  return ingestionRequest(token, '/files', { method: 'POST', body: data })
+}
+
+export function submitIngestionUrl(token: string, url: string, visibility: 'staff' | 'admin'): Promise<IngestionJob> {
+  return ingestionRequest(token, '/urls', { method: 'POST', body: JSON.stringify({ url: url.trim(), visibility }) })
+}
+
+export function submitSitemap(token: string, url: string, visibility: 'staff' | 'admin', maxPages: number): Promise<IngestionJob> {
+  return ingestionRequest(token, '/sitemaps', { method: 'POST', body: JSON.stringify({ url: url.trim(), visibility, max_pages: maxPages }) })
+}
+
+export function retryIngestionJob(token: string, id: string): Promise<IngestionJob> {
+  return ingestionRequest(token, `/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+}
+
+export function removeIngestedSource(token: string, id: string): Promise<IngestionJob> {
+  return ingestionRequest(token, `/sources/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}

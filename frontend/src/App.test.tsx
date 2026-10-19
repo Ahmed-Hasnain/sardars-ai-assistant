@@ -30,6 +30,18 @@ it('shows conversation previews and a warning on reopened history', () => {
   expect(html).toContain('Which brands does Sardars offer?')
   expect(html).toContain('Earlier answer')
   expect(html).toContain('Earlier answers may be stale.')
+  expect(html).not.toContain('Knowledge sources</button>')
+})
+
+it('shows the knowledge workspace navigation only to admins', () => {
+  mocked.state = {
+    token: 'test-token', status: 'idle',
+    user: { id: 2, email: 'admin@example.com', role: 'admin', is_active: true },
+    conversationId: null, historyLoading: false, historyHasMore: false,
+    historyError: null, conversationLoading: false, olderLoading: false, olderCursor: null,
+    conversations: [], messages: [], historicalNotice: null,
+  }
+  expect(renderToStaticMarkup(<App />)).toContain('Knowledge sources</button>')
 })
 
 it('renders cited Markdown while blocking raw HTML and unsafe links', () => {

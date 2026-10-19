@@ -11,6 +11,7 @@ from app.ingestion.prepare_site import prepare_chunks
 from app.ingestion.public_site import source_type
 from app.ingestion.site_documents import WebsiteDocument
 from app.ingestion.documents import SuppliedDocument, file_url, valid_source, valid_web_url
+from app.schemas.ingestion import SitemapSubmission
 
 MAX_JOB_BYTES = 3 * 1024 * 1024
 
@@ -45,22 +46,27 @@ class StagedSource(BaseModel):
 
 class JobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["import", "remove"]
+    operation: Literal["import", "remove", "crawl"]
     scope: Literal["public_site", "internal"] = "public_site"
     documents: list[WebsiteDocument | SuppliedDocument] = Field(default_factory=list, max_length=10)
     urls: list[str] = Field(default_factory=list, max_length=10)
     staged: StagedSource | None = None
+    crawl: SitemapSubmission | None = None
 
     @model_validator(mode="after")
     def check_request(self) -> Self:
-        if self.operation == "import":
-            if bool(self.documents) == bool(self.staged) or self.urls:
+        if self.operation == "crawl":
+            if self.scope != "internal" or self.crawl is None or self.documents or self.urls or self.staged:
+                raise ValueError("Crawl requires only a bounded internal sitemap reference")
+            urls = []
+        elif self.operation == "import":
+            if self.crawl is not None or bool(self.documents) == bool(self.staged) or self.urls:
                 raise ValueError("Import requires either document snapshots or one staged source")
             if self.staged and self.scope != "internal":
                 raise ValueError("Only internal imports may stage a source")
             urls = [self.staged.url] if self.staged else [document.url for document in self.documents]
         else:
-            if not self.urls or self.documents or self.staged:
+            if not self.urls or self.documents or self.staged or self.crawl is not None:
                 raise ValueError("Removal requires explicit URLs only")
             urls = self.urls
         if self.scope == "public_site" and any(not isinstance(doc, WebsiteDocument) for doc in self.documents):
@@ -78,6 +84,8 @@ class JobRequest(BaseModel):
             # Keep saved pre-E3 job snapshots byte-for-byte compatible with
             # idempotent CLI replay using an existing job ID.
             del value["staged"]
+        if value["crawl"] is None:
+            del value["crawl"]
         if len(json.dumps(value, ensure_ascii=False).encode()) > MAX_JOB_BYTES:
             raise ValueError("Job snapshot exceeds the size limit")
         return value
@@ -85,6 +93,8 @@ class JobRequest(BaseModel):
     def source_urls(self) -> list[str]:
         if self.operation == "remove":
             return self.urls
+        if self.operation == "crawl":
+            return []
         return [self.staged.url] if self.staged else [document.url for document in self.documents]
 
 

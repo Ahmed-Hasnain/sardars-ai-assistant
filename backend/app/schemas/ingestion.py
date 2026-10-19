@@ -19,6 +19,22 @@ class URLSubmission(BaseModel):
         return value
 
 
+class SitemapSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=1, max_length=2048)
+    visibility: Literal["staff", "admin"] = "staff"
+    max_pages: int = Field(default=1500, ge=1, le=1500)
+
+    @field_validator("url")
+    @classmethod
+    def check_sitemap(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        if not valid_web_url(value) or not urlsplit(value).path.lower().endswith(".xml"):
+            raise ValueError("Use a direct HTTPS sitemap XML URL without credentials, query, or fragment")
+        return value
+
+
 class FileSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid")
     visibility: Literal["public", "staff", "admin"] = "staff"

@@ -85,13 +85,73 @@ async function scenario(browser, viewport) {
   await context.close()
 }
 
+async function adminKnowledgeScenario(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  const id = '33333333-3333-3333-3333-333333333333'
+  let job = null
+  let submittedFile = false
+  let submittedSitemap = false
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/api/v1/auth/login') return route.fulfill(json({ access_token: 'admin-test-token' }))
+    if (path === '/api/v1/auth/me') return route.fulfill(json({ id: 2, email: 'admin@example.com', role: 'admin', is_active: true }))
+    if (path === '/api/v1/conversations') return route.fulfill(json([]))
+    if (path === '/api/v1/ingestion/jobs' && request.method() === 'GET') return route.fulfill(json(job ? [job] : []))
+    if (path === '/api/v1/ingestion/sources') return route.fulfill(json([]))
+    if (path === '/api/v1/ingestion/files' && request.method() === 'POST') {
+      assert.equal(request.headers().authorization, 'Bearer admin-test-token')
+      assert.match(request.headers()['content-type'], /^multipart\/form-data;/)
+      submittedFile = true
+      job = { job_id: id, operation: 'import', status: 'pending', attempts: 0, max_attempts: 3, error: null }
+      return route.fulfill(json(job, 202))
+    }
+    if (path === '/api/v1/ingestion/sitemaps' && request.method() === 'POST') {
+      assert.equal(request.headers().authorization, 'Bearer admin-test-token')
+      assert.equal(JSON.parse(request.postData()).max_pages, 2)
+      submittedSitemap = true
+      job = { job_id: id, operation: 'crawl', status: 'completed', attempts: 1, max_attempts: 3, error: null,
+        crawl_progress: { discovered_pages: 2, queued_pages: 2, pending: 1, processing: 0, completed: 1, failed: 0 } }
+      return route.fulfill(json(job, 202))
+    }
+    if (path === `/api/v1/ingestion/jobs/${id}/pages`) return route.fulfill(json([{
+      job_id: '44444444-4444-4444-4444-444444444444', operation: 'import', status: 'completed',
+      url: 'https://sardarandco.com/pages/about-us', attempts: 1, max_attempts: 3, error: null,
+    }]))
+    if (path === `/api/v1/ingestion/jobs/${id}`) return route.fulfill(json(job))
+    throw new Error(`Unexpected admin API route: ${path}`)
+  })
+
+  await page.goto(origin)
+  await page.getByLabel('Email address').fill('admin@example.com')
+  await page.getByLabel('Password').fill('test-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('button', { name: 'Knowledge sources' }).click()
+  await page.getByRole('heading', { name: 'Upload a document' }).waitFor()
+  await page.locator('#knowledge-file').setInputFiles({ name: 'profile.txt', mimeType: 'text/plain', buffer: Buffer.from('Approved company description.') })
+  await page.getByRole('button', { name: 'Upload file' }).click()
+  await page.getByText('File submitted.').waitFor()
+  assert.equal(submittedFile, true)
+  assert.equal(await page.locator('#knowledge-file').inputValue(), '')
+
+  await page.locator('#knowledge-sitemap-limit').fill('2')
+  await page.getByRole('button', { name: 'Import sitemap' }).click()
+  await page.getByText('Sitemap submitted.').waitFor()
+  await page.getByText('Pages: 1 completed, 0 failed, 1 pending').waitFor()
+  await page.getByText('https://sardarandco.com/pages/about-us').waitFor()
+  assert.equal(submittedSitemap, true)
+  await context.close()
+}
+
 let browser
 try {
   await ready()
   browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] })
   await scenario(browser, { width: 1440, height: 900 })
   await scenario(browser, { width: 390, height: 844 })
-  console.log('Desktop and mobile browser smoke passed: login, retry, streamed answer, citations, authenticated file download, refresh, history, keyboard focus, layout.')
+  await adminKnowledgeScenario(browser)
+  console.log('Desktop/mobile chat and admin knowledge smoke passed: login, retry, streamed answer, citations, authenticated file download, refresh, history, file upload, sitemap progress, keyboard focus and layout.')
 } finally {
   await browser?.close()
   vite.kill('SIGTERM')

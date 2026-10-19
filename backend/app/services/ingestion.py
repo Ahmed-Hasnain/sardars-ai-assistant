@@ -3,6 +3,7 @@
 from hashlib import sha256
 from urllib.parse import urlsplit
 from uuid import uuid4
+from sqlalchemy import func, select
 
 from fastapi import HTTPException
 import httpx
@@ -19,7 +20,7 @@ from app.ingestion.job_runner import JobFailed, run_job
 from app.ingestion.job_store import enqueue, now, requeue
 from app.ingestion.public_site import source_type
 from app.ingestion.site_index import WebsiteIndexer
-from app.schemas.ingestion import FileSubmission, URLSubmission
+from app.schemas.ingestion import FileSubmission, URLSubmission, SitemapSubmission
 
 
 def load_user(db: Session, user_id: int) -> User:
@@ -126,6 +127,29 @@ def import_url(sessions: sessionmaker[Session], settings: Settings, user_id: int
                   kind=kind, visibility=submission.visibility, filename="page.html", media_type="text/html")
 
 
+def submit_sitemap(sessions: sessionmaker[Session], settings: Settings, user_id: int,
+                   submission: SitemapSubmission) -> dict:
+    if settings.ingestion_runner != "worker":
+        raise HTTPException(409, "Sitemap imports require the ingestion worker")
+    if urlsplit(submission.url).hostname not in settings.ingestion_url_hosts:
+        raise HTTPException(400, "Sitemap host is not configured for ingestion")
+    with sessions() as db:
+        if load_user(db, user_id).role != "admin":
+            raise HTTPException(403, "Admin access required")
+    job_id = enqueue(sessions, JobRequest(operation="crawl", scope="internal", crawl=submission),
+                     submitted_by_user_id=user_id)
+    return {"job_id": job_id, "status": "pending"}
+
+
+def crawl_progress(db: Session, job: IngestionJob) -> dict:
+    counts = dict(db.execute(select(IngestionJob.status, func.count()).where(
+        IngestionJob.parent_job_id == job.id).group_by(IngestionJob.status)).all())
+    expected = job.result.get("discovered_pages") if isinstance(job.result, dict) else None
+    return {"discovered_pages": expected, "queued_pages": sum(counts.values()),
+            "pending": counts.get("pending", 0), "processing": counts.get("processing", 0),
+            "completed": counts.get("completed", 0), "failed": counts.get("failed", 0)}
+
+
 def accessible_job(db: Session, user: User, job_id: str) -> IngestionJob:
     job = db.get(IngestionJob, job_id)
     if job is None or (user.role != "admin" and job.submitted_by_user_id != user.id):
@@ -137,6 +161,8 @@ def accessible_job(db: Session, user: User, job_id: str) -> IngestionJob:
         if user.role != "admin":
             raise HTTPException(404, "Job not found") from None
         return job
+    if request.operation == "crawl" and user.role != "admin":
+        raise HTTPException(404, "Job not found")
     for url in request.source_urls():
         source = db.get(SourceRegistration, source_id(url))
         if (source and not can_read(user, source)) or (user.role != "admin" and any(

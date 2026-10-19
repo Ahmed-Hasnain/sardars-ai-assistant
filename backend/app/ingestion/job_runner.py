@@ -11,6 +11,7 @@ from app.ingestion.extraction import ExtractionError
 from app.ingestion.job_store import claim, fail
 from app.ingestion.materialize import materialize
 from app.ingestion.site_index import IndexingError, WebsiteIndexer
+from app.ingestion.sitemap_jobs import run_crawl
 from app.ingestion.sync_sources import process
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,11 @@ def run_job(sessions: sessionmaker[Session], job_id: str, indexer: WebsiteIndexe
     run = claim(sessions, job_id, indexer.settings.import_timeout_seconds, retry=retry)
     logger.info("ingestion_started job_id=%s attempt=%s operation=%s", job_id, run.attempt, run.request.operation)
     try:
-        run = materialize(sessions, run, indexer.settings)
-        result = process(sessions, run, indexer)
+        if run.request.operation == "crawl":
+            result = run_crawl(sessions, run, indexer.settings)
+        else:
+            run = materialize(sessions, run, indexer.settings)
+            result = process(sessions, run, indexer)
     except Exception as exc:
         if isinstance(exc, ExtractionError):
             code, message = "extraction_error", str(exc)

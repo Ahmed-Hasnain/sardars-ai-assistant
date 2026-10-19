@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from hashlib import sha256
+import time
 from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,6 +16,8 @@ from app.ingestion.job_requests import JobRequest, source_id
 from app.ingestion.job_store import JobRun, now, require_run, transaction
 from app.ingestion.sync_sources import source_record
 
+MIN_SITEMAP_PAGE_DELAY_SECONDS = 0.5
+
 
 def materialize(sessions: sessionmaker[Session], run: JobRun, settings: Settings) -> JobRun:
     staged = run.request.staged
@@ -23,6 +26,7 @@ def materialize(sessions: sessionmaker[Session], run: JobRun, settings: Settings
     with transaction(sessions) as db:
         job = require_run(db, run)
         user = actor(db, job)
+        is_sitemap_page = job.parent_job_id is not None
         source = source_record(db, staged.url, lock=True, internal=True)
         check_submission(user, source, staged.visibility)
         if source and (not source.is_active or source.source_type != staged.source_type):
@@ -44,6 +48,8 @@ def materialize(sessions: sessionmaker[Session], run: JobRun, settings: Settings
     else:
         if urlsplit(staged.url).hostname not in settings.ingestion_url_hosts:
             raise ValueError("URL host is no longer configured for ingestion")
+        if is_sitemap_page:
+            time.sleep(MIN_SITEMAP_PAGE_DELAY_SECONDS)
         raw, title, text = extract_url(staged.url, settings)
         key, checksum = store_original(settings, raw)
         created_key = key

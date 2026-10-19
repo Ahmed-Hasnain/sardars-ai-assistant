@@ -2,11 +2,29 @@
 
 A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. This monorepo contains the FastAPI backend and a React/Vite/TypeScript frontend. The backend provides PostgreSQL-backed conversations, revocable internal login, local-model chat through Ollama, and authorized Qdrant retrieval.
 
-The original prototype roadmap through Phase 12 is recorded in [PLAN.md](PLAN.md). Current work follows [EXTENDED_PLAN.md](EXTENDED_PLAN.md); verified behavior and open limitations are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The isolated local stack is runnable, while final data-backed E1 container acceptance is deferred until after E4's registration and ingestion journey. [E2 model comparison](docs/e2_model_comparison.md) and [E3 ingestion-runner selection](docs/e3_ingestion_runner.md) are complete on this laptop; E4 registration and RAG ingestion is next. Production deployment is deferred.
+The original prototype roadmap through Phase 12 is recorded in [PLAN.md](PLAN.md). Current work follows [EXTENDED_PLAN.md](EXTENDED_PLAN.md); verified behavior and open limitations are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The isolated local stack is runnable, while final data-backed E1 container acceptance is deferred until after E4's admin ingestion journey. [E2 model comparison](docs/e2_model_comparison.md) and [E3 ingestion-runner selection](docs/e3_ingestion_runner.md) are complete on this laptop. E4's admin upload and sitemap workflow is implemented; its real-data and before/after evaluation exit checks remain open. Internal self-registration and approval are deferred. Production deployment is deferred.
 
 An isolated containerization checkpoint is documented in [docs/e1_local_container_checkpoint.md](docs/e1_local_container_checkpoint.md). It uses `compose.local.yaml` for the API, frontend, PostgreSQL, Qdrant and containerized Ollama, with a persistent model store, automatic pulls of missing models, an empty Qdrant collection initializer, and separate volumes/ports. For a 16 GB Apple Silicon Mac mini, use `compose.local.mac.yaml` as described there; Ollama remains containerized and runs on CPU because Docker Desktop on macOS cannot pass through the Apple GPU. The current `compose.yaml` and `scripts/dev.sh` workflow remains available while E1 is being verified; signed-in company abstention was observed in the empty stack, but catalog and ingested-source flows remain open.
 
 On the current Linux development machine, Git-ignored `.env` selects `SARDARS_OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M` for `compose.local.yaml`. The selected 4B tag is installed in that stack's Ollama volume, and the API adapter has returned a live 4B response. A fresh machine must set the same variable if it should use 4B; the Compose model initializer will pull a missing standard Ollama tag. The older host-Ollama `scripts/dev.sh` workflow needs its own copy of a selected model and was not switched or retested in E2. See [the E2 comparison](docs/e2_model_comparison.md) for the measured quality and latency tradeoff.
+
+## Start and stop the complete Docker stack
+
+From the project root, with Docker running and `.env` configured, use these two commands for the local API, web app, PostgreSQL, Qdrant, Ollama and ingestion worker:
+
+Start everything (builds changed app images and shows all service logs in this terminal):
+
+```bash
+docker compose -f compose.local.yaml up --build
+```
+
+Stop everything:
+
+```bash
+docker compose -f compose.local.yaml down
+```
+
+Open `http://127.0.0.1:15173/` after startup. The `up` command stays open and shows combined logs; press **Ctrl+C** to stop the services. Run `down` afterward to remove the stopped containers. `down` **keeps the named volumes** containing PostgreSQL data, Qdrant data, uploads and Ollama models. Do not add `--volumes` when you want to keep that data. The first startup may take longer while Docker pulls images and Ollama downloads missing models.
 
 ## Local setup
 
@@ -42,7 +60,15 @@ Run the frontend in a second terminal (Node.js 20.19+ or 22.12+):
 
 Open http://127.0.0.1:5173 and sign in with an existing admin or staff account. Vite proxies `/api` to the local FastAPI server on port 8000; the browser does not need a separate CORS allowance. The frontend supports sign-in, new and follow-up chats, safe Markdown, returned citations, retry after an API error, and a sidebar of owned conversations. The list shows a short preview of each conversation's first question. Open one to read its latest 50 messages and load older pages; earlier answers are marked as historical because business facts may have changed. Historical citations are reconstructed only while each source is currently active, indexed and visible to your role. Uploaded source links download through the authenticated API. Answer text may link only to URLs in its returned citations.
 
-The browser keeps the bearer token and active conversation ID in this tab's `sessionStorage` so refresh can restore the chat. On startup, the frontend checks the token with `/auth/me` before showing any saved conversation; logout or HTTP 401 clears it. Closing the tab ends this browser-side session, and the backend still enforces its eight-hour token expiry and role/source visibility. Browser storage is accessible to JavaScript, so a later production authentication design should use an HTTP-only cookie and its CSRF controls. The browser uses `POST /api/v1/chat/stream` for SSE delivery. The API authenticates, checks and saves the whole answer before sending any text, so it cannot leak an unverified intermediate company claim; the first chunk arrives after generation finishes. `POST /api/v1/chat` remains a JSON option. Production static hosting is deferred to E9; a local containerized frontend is planned in E1.
+The browser keeps the bearer token and active conversation ID in this tab's `sessionStorage` so refresh can restore the chat. On startup, the frontend checks the token with `/auth/me` before showing any saved conversation; logout or HTTP 401 clears it. Closing the tab ends this browser-side session, and the backend still enforces its eight-hour token expiry and role/source visibility. Browser storage is accessible to JavaScript, so a later production authentication design should use an HTTP-only cookie and its CSRF controls. The browser uses `POST /api/v1/chat/stream` for SSE delivery. The API authenticates, checks and saves the whole answer before sending any text, so it cannot leak an unverified intermediate company claim; the first chunk arrives after generation finishes. `POST /api/v1/chat` remains a JSON option. Production static hosting is deferred to E9; E1 already serves the local frontend in a container.
+
+### Admin knowledge imports in the local stack
+
+Start the isolated stack with the `up --build` command above and sign in at `http://127.0.0.1:15173/` as an existing admin. The **Knowledge sources** workspace submits a text PDF, UTF-8 TXT/Markdown file (up to 5 MiB), one allowed HTTPS HTML page, or a direct HTTPS `.xml` sitemap URL. Use **Visible to** to choose staff-and-admin or admin-only retrieval before submitting. Jobs return immediately with an ID; the separate worker extracts and indexes them. The screen polls job status, shows sitemap page progress and failures, lists registered sources, and offers retry, removal and same-source document replacement. A replacement must retain the source's format and visibility. Staff may still use the pre-existing authorized API paths for their own individual submissions, but the new browser workspace and sitemap submission require admin access.
+
+Sitemap discovery reads an allowed host's robots rules, follows only same-host XML indexes and descriptive page URLs, and queues one durable child job per eligible page. Its limits are 1,500 pages, 16 XML files, two nested XML levels, 5 MiB per XML, and 12 MiB total XML bytes. Child page extraction has its own size, time and robots limits; jobs may fail when a page cannot yield usable text. The parent job's `completed` status means discovery and queueing finished; check **Pages** for indexing progress. Repeating a sitemap creates another crawl job whose page imports update stable source IDs; it does not automatically remove pages no longer present on the site. A failed parent can be retried up to the existing three-attempt limit, reusing its saved page list after partial queueing. This is a serial local worker, so a large crawl can take a long time; there is no cancel control yet. Scanned PDFs need OCR, and DOCX is not supported. The current SKU, price and stock tool continues to read PostgreSQL rather than imported RAG text.
+
+The authenticated API equivalents are `POST /api/v1/ingestion/files`, `/urls`, and admin-only `/sitemaps`; `GET /api/v1/ingestion/jobs`, `/jobs/{id}`, `/jobs/{id}/pages`, and `/sources`; `POST /jobs/{id}/retry`; and `DELETE /sources/{source_id}`. The browser routes through the web proxy. See [the E4 checkpoint](docs/e4_admin_ingestion_checkpoint.md) for limits, verification, and remaining live-data checks. Do not run `docker compose down --volumes` when restarting: the database, Qdrant, uploads and models live in named volumes.
 
 Frontend checks:
 
