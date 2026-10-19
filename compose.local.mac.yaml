@@ -1,0 +1,7 @@
+# Optional 16 GB Mac mini profile. Ollama runs on CPU inside Docker Desktop's Linux VM.
+services:
+  ollama:
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_MAX_QUEUE: "8"

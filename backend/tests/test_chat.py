@@ -34,6 +34,28 @@ def test_chat_returns_unverified_answer() -> None:
     assert mock_chat.await_args.args[0][-1]["content"] == "Hello"
 
 
+def test_conversational_mixer_definition_uses_bathroom_meaning() -> None:
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock) as model:
+        response = client.post("/api/v1/chat", json={"message": "ok tell me what is mixer"})
+    assert response.status_code == 200
+    assert response.json()["route"] == "general"
+    assert "hot and cold water" in response.json()["answer"]
+    assert "tap or shower" in response.json()["answer"]
+    model.assert_not_awaited()
+
+
+def test_world_trivia_is_out_of_scope_without_model_or_retrieval() -> None:
+    with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock) as model, \
+         patch("app.api.chat.answer_company", new_callable=AsyncMock) as company:
+        response = client.post("/api/v1/chat", json={
+            "message": "tell me how many countries are in the world",
+        })
+    assert response.status_code == 200
+    assert response.json()["route"] == "out_of_scope"
+    model.assert_not_awaited()
+    company.assert_not_awaited()
+
+
 def test_stream_sends_complete_checked_answer_and_metadata() -> None:
     result = ChatResult("A mixer controls water flow. " * 8, "test-model", 5, 30, 10.0)
     with patch("app.api.chat.chat_model.chat", new_callable=AsyncMock, return_value=result):

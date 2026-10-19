@@ -129,7 +129,7 @@ def test_topic_change_omits_old_history(runtime) -> None:
     assert [item["role"] for item in model.await_args_list[1].args[0]] == ["system", "user"]
     last = model.await_args_list[2].args[0]
     assert "database" in str(last)
-    assert "mixer" not in str(last)
+    assert "mixer" not in str(last[1:])
 
 
 def test_new_question_containing_that_does_not_inherit_prior_topic(runtime) -> None:

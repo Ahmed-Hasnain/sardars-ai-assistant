@@ -1,13 +1,13 @@
 # Sardars AI Assistant — extended plan
 
 Last reviewed: 2026-10-19
-Status: active roadmap; no extended checkpoint has been completed
+Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 model comparison complete on current laptop; E3 is next
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
 ## Purpose and order
 
-The English internal prototype completed Phases 1–12 of `PLAN.md`. The original Phase 13 deployment work and its deferred follow-up backlog move here because deployment is not currently planned. After local containerization and a measured model comparison, decide how RAG ingestion jobs execute, then build the complete account-to-ingestion flow for the developer's Sardars data. Reassess retrieval and tool choice with that richer corpus before adding optional capabilities. Production deployment is a separate, later decision. Moving work here does **not** mark it implemented or clear the six remaining full-site evaluation failures.
+The English internal prototype completed Phases 1–12 of `PLAN.md`. The original Phase 13 deployment work and its deferred follow-up backlog move here because deployment is not currently planned. The isolated E1 stack now starts and answers safely with an empty corpus; the developer does not want to insert Sardars data merely to close E1. E2 compared the retained original corpus on the same Ollama server; the developer selected 4B for the current local Docker application despite slower measured responses and unchanged automated scores. See `docs/e2_model_comparison.md`. Decide the ingestion runner in E3 and build the account-registration-to-RAG journey in E4. After Sardars data is entered through that journey, return to the remaining E1 end-to-end, restart and backup/restore checks **before** advancing to E5. Reassess retrieval and tool choice with that richer corpus before adding optional capabilities. Production deployment is a separate, later decision. This resequencing does **not** mark E1 or E3/E4 complete or clear the six remaining full-site evaluation failures.
 
 Work in small, runnable checkpoints. Before each substantial change, explain the concept, alternatives and trade-offs. Keep a measured baseline and run the relevant regression suites after changes. Update `IMPLEMENTATION_STATUS.md` only after a verified major checkpoint, and update this plan when an exit criterion or order changes. The sequence below may change when measurements or developer decisions justify it.
 
@@ -17,48 +17,53 @@ Across every checkpoint: keep self-hosted inference; preserve authentication, ap
 
 ## E1 — Complete local containerization
 
-Goal: run the existing application reproducibly on one development machine without publishing it.
+Goal: run the existing application reproducibly on one development machine without publishing it. The runnable empty-data stack is an intermediate checkpoint; final E1 acceptance follows E4's real data entry.
 
-- [ ] Add pinned, buildable API and frontend images and a local Compose workflow for API, frontend, PostgreSQL, Qdrant and Ollama. Preserve data/model volumes and allow an existing Ollama host-service option if local hardware makes that preferable.
+- [ ] Add pinned, buildable API and frontend images and a local Compose workflow for API, frontend, PostgreSQL, Qdrant and containerized Ollama by default. Preserve data/model volumes; offer an optional NVIDIA GPU override for compatible hosts.
 - [ ] Configure service-name networking, health/readiness checks, startup and migration commands, secrets from local environment rather than images, and localhost-only user-facing ports. Keep database, vector and inference services private to the Compose network by default.
 - [ ] Document initial model pulls, first admin creation, startup, shutdown, updates and safe backup/restore of local volumes. Existing developer data must survive normal restarts and image rebuilds.
 - [ ] Verify a clean-volume start and a restart with retained data; run authenticated chat, product lookup, authorized retrieval, frontend login and the relevant backend/frontend checks. Compare basic latency with the current host setup before deciding whether to retire `scripts/dev.sh`.
 
-Exit: a developer can start the complete internal application locally, use its core flows and restart it without losing data. This is **local infrastructure**, not the production-deployment exit.
+Exit, checked **after E4**: a developer can start the complete internal application locally, use its core flows with data entered through the new journey, and restart or restore it without losing data. Verify authenticated chat, authorized cited retrieval, frontend login, persistence, backup/restore and basic latency against the existing workflow. Verify product lookup separately against a controlled authorized PostgreSQL row or a safely restored catalog; RAG documents do not populate the product table. E1 stays open until that evidence is recorded. This is **local infrastructure**, not the production-deployment exit.
 
 ## E2 — Measure and improve model answer quality
 
 Goal: test whether a larger local chat model produces better grounded answers on this hardware.
 
-- [ ] Freeze the current prompts, retrieval corpus, tool rules and case definitions; record the active model, quantization, memory use and repeatable `qwen3:0.6b` baseline.
-- [ ] Compare an available 4B-class Qwen instruct model first, then an 8B-class or other open-weight option only if hardware and latency permit. Keep the embedding model/collection unchanged during the chat-model comparison.
-- [ ] Run the same 26-case chat, seven-case seed and 40-case full-site suites, plus a small blinded human review of real staff questions. Compare factual support, citations, abstentions, unsafe claims, phrasing, follow-ups, tool-choice outcomes, median/p95 latency, timeouts and memory/swap pressure. Recheck model response and tool-call formats through the Ollama adapter.
-- [ ] Adopt a new default only when its measured quality gain is worth the resource cost and security/authorization checks remain passing; otherwise retain the current model and record why.
+- [x] Freeze the current prompts, retrieval corpus, tool rules and case definitions; record the active model, quantization, memory use and repeatable `qwen3:0.6b` baseline.
+- [x] Compare an available 4B-class Qwen instruct model first, then an 8B-class or other open-weight option only if hardware and latency permit. Keep the embedding model/collection unchanged during the chat-model comparison. The observed 4B latency on this CPU ruled out an 8B run here.
+- [x] Run the same 26-case chat, seven-case seed and 40-case full-site suites, plus a blinded comparison of real staff questions. All eight staff answer/citation pairs were exactly identical, so they were scored as objective ties without separate subjective human grading. Compare factual support, citations, abstentions, unsafe claims, phrasing, follow-ups, tool-choice outcomes, median/p95 latency, timeouts and memory/swap pressure. Recheck model response and tool-call formats through the Ollama adapter. Independent human review after E4's richer data remains open.
+- [x] Make a documented local model choice from measured quality, resource cost and developer preference while keeping security/authorization checks passing. The developer selected 4B for the current Docker application despite its higher latency; the shared code fallback remains 0.6B for other environments.
 
 Exit: a documented model choice based on comparable results. A larger model alone does not fix missing retrieval evidence or the application's rule-based tool routing.
 
+E2 completed on 2026-10-19 for the retained corpus/current CPU. Both models passed 26/26 chat and 7/7 seed cases, and each passed 34/40 full-site cases with the same six failures. Eight blinded staff pairs had identical text and citations; the developer confirmed recording these as exact ties in place of subjective human scoring, a change to the review method rather than a claim of independent human approval. The developer selected 4B for the current local Docker application despite slower model-invoking turns and no measured correctness gain; retest it after E4 or on stronger hardware if useful. See `docs/e2_model_comparison.md` for the full evidence and limits.
+
 ## E3 — Decide how ingestion work runs
 
-Goal: make larger uploads and sitemap imports reliable without adding an unnecessary queue stack.
+Goal: make larger uploads and sitemap imports reliable before building the registration/ingestion UI. The current API records durable jobs but still waits for extraction and indexing in the request; measure whether a separate worker is needed.
 
 - [ ] Measure current durable-job runtime, request blocking, queueing, retry/recovery and CPU/memory use on controlled files and sitemap samples representative of the Sardars data to be ingested.
 - [ ] Compare the existing synchronous runner, a small dedicated worker and Celery with a broker. Choose the least complex option that meets the measured workload.
+- [ ] If Celery is selected, add a broker and worker to the local Compose stack in a small runnable checkpoint. Pass job IDs rather than document text through the broker; let the API return an accepted job ID and let the UI poll the existing authorized job endpoint. Verify restart/retry behavior before relying on the worker for bulk imports.
 - [ ] Preserve owner/role checks, leases, idempotency, bounded retries, progress, update/deletion and safe publication between PostgreSQL and Qdrant. A failed job must not expose partial or unauthorized content.
 
-Exit: a documented runner choice and tested recovery for the selected workload. Celery/Redis are conditional, not automatic dependencies.
+Exit: a documented runner choice and tested recovery for the selected workload. Celery/Redis are strong candidates for lengthy imports, but remain conditional until the E3 comparison demonstrates the need and verifies their failure behavior.
 
 ## E4 — Fresh-account-to-ingestion journey
 
 Goal: complete the path from a newly approved internal account through Sardars company-data submission, RAG ingestion and authorized answers.
 
-- [ ] Resolve the account rule first: invitation, open signup with staff approval, or an unprivileged pending role. A new account cannot self-assign admin or staff. Define whether submitted sources are owner-private, staff-shared or admin-only.
+- [ ] Add an internal registration request that creates an inactive/pending account; an existing admin must approve and assign staff access before login or ingestion. The first admin remains operator-created. Rate-limit registration and prevent role self-assignment. Define whether submitted sources are staff-shared or admin-only; public customer access remains deferred.
 - [ ] Inventory the available Sardars files, URLs and sitemap; identify descriptive claims, source authority, visibility, formats, duplicates and update/freshness rules. Save representative questions and the current answers before ingestion so improvements can be measured. Company documents do not replace PostgreSQL for current price, SKU or stock.
-- [ ] Add the signup/approval and file/URL/sitemap UI for approved admins and staff. Extend the bounded single-URL importer into an authenticated crawl with domain, robots, size and page limits; durably stage crawl references before indexing. Decide DOCX/OCR separately.
+- [ ] Add registration and pending/approval UI, then file/URL/sitemap submission UI for approved admins and staff, plus source list, job status, retry and removal controls. Reuse the existing authenticated ingestion and job endpoints where possible; adapt submission to the E3 runner. Extend the bounded single-URL importer into an authenticated crawl with domain, robots, size and page limits; durably stage crawl references before indexing. Decide DOCX/OCR separately.
 - [ ] Use the selected runner to ingest a small Sardars sample first, inspect extraction/chunks/citations and role visibility, then import the remaining authorized sources in bounded batches. Preserve stable source IDs, provenance, progress, retries and update/deletion. Use external original-document storage only if measured size/operational needs justify it.
 - [ ] Reask the saved questions after each batch; compare grounded answer quality, retrieval/source hits, unsupported claims and latency with the pre-ingestion results and the retained chat/seed/full-site suites. Diagnose any remaining failures by layer rather than assuming more data guarantees better answers.
 - [ ] For any requested fresh-start exercise, first inventory and back up RAG tables, originals and Qdrant; write a reversible, exact reset scope and verify restore before clearing data. Preserve users, conversations and authoritative products unless explicitly included in an approved reset.
 
 Exit: a newly approved internal account can submit supported Sardars content, observe completion and retrieve only visible indexed sources; failures, revocation and updates behave correctly. Before/after evaluation shows where the new data improved answers and what still fails.
+
+After this exit, finish and record the deferred E1 data-backed checks above. Do not infer E1 completion from E4's UI or job status alone.
 
 ## E5 — Close full-corpus retrieval and evidence regressions
 
