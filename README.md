@@ -2,9 +2,11 @@
 
 A self-hosted AI assistant for Sardars, initially intended for admins and internal staff. This monorepo contains the FastAPI backend and a React/Vite/TypeScript frontend. The backend provides PostgreSQL-backed conversations, revocable internal login, local-model chat through Ollama, and authorized Qdrant retrieval.
 
-The original prototype roadmap through Phase 12 is recorded in [PLAN.md](PLAN.md). Current work follows [EXTENDED_PLAN.md](EXTENDED_PLAN.md); verified behavior and open limitations are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The isolated local stack is runnable, while final data-backed E1 container acceptance is deferred until after E4's registration and ingestion journey. E2 model comparison is next on the retained original evaluation corpus. Production deployment is deferred.
+The original prototype roadmap through Phase 12 is recorded in [PLAN.md](PLAN.md). Current work follows [EXTENDED_PLAN.md](EXTENDED_PLAN.md); verified behavior and open limitations are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The isolated local stack is runnable, while final data-backed E1 container acceptance is deferred until after E4's registration and ingestion journey. [E2 model comparison](docs/e2_model_comparison.md) is complete on this laptop; E3 ingestion-runner selection is next. Production deployment is deferred.
 
 An isolated containerization checkpoint is documented in [docs/e1_local_container_checkpoint.md](docs/e1_local_container_checkpoint.md). It uses `compose.local.yaml` for the API, frontend, PostgreSQL, Qdrant and containerized Ollama, with a persistent model store, automatic pulls of missing models, an empty Qdrant collection initializer, and separate volumes/ports. For a 16 GB Apple Silicon Mac mini, use `compose.local.mac.yaml` as described there; Ollama remains containerized and runs on CPU because Docker Desktop on macOS cannot pass through the Apple GPU. The current `compose.yaml` and `scripts/dev.sh` workflow remains available while E1 is being verified; signed-in company abstention was observed in the empty stack, but catalog and ingested-source flows remain open.
+
+On the current Linux development machine, Git-ignored `.env` selects `SARDARS_OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M` for `compose.local.yaml`. The selected 4B tag is installed in that stack's Ollama volume, and the API adapter has returned a live 4B response. A fresh machine must set the same variable if it should use 4B; the Compose model initializer will pull a missing standard Ollama tag. The older host-Ollama `scripts/dev.sh` workflow needs its own copy of a selected model and was not switched or retested in E2. See [the E2 comparison](docs/e2_model_comparison.md) for the measured quality and latency tradeoff.
 
 ## Local setup
 
@@ -77,7 +79,7 @@ If a password or token is exposed, reset that account locally. This prompts twic
 
 Recognizable medical and fertility questions return `route: out_of_scope` without a model or retrieval call; `/ask` abstains. This English keyword check prevents the observed conception-advice failure but is not comprehensive medical-intent detection.
 
-Install Ollama using its [Linux instructions](https://docs.ollama.com/linux), then download the small model used on this laptop:
+For the older host-Ollama workflow, install Ollama using its [Linux instructions](https://docs.ollama.com/linux), then download the original small baseline model. The current Docker stack on this machine selects 4B as described above:
 
     ollama pull qwen3:0.6b
 

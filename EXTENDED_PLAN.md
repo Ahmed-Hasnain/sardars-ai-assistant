@@ -1,13 +1,13 @@
 # Sardars AI Assistant — extended plan
 
 Last reviewed: 2026-10-19
-Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 is next
+Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 model comparison complete on current laptop; E3 is next
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
 ## Purpose and order
 
-The English internal prototype completed Phases 1–12 of `PLAN.md`. The original Phase 13 deployment work and its deferred follow-up backlog move here because deployment is not currently planned. The isolated E1 stack now starts and answers safely with an empty corpus; the developer does not want to insert Sardars data merely to close E1. Proceed with E2's unchanged model comparison using the retained original evaluation corpus, then decide the ingestion runner in E3 and build the account-registration-to-RAG journey in E4. After Sardars data is entered through that journey, return to the remaining E1 end-to-end, restart and backup/restore checks **before** advancing to E5. Reassess retrieval and tool choice with that richer corpus before adding optional capabilities. Production deployment is a separate, later decision. This resequencing does **not** mark E1 or E3/E4 complete or clear the six remaining full-site evaluation failures. If the retained original corpus is unavailable for E2, restore or otherwise verify its baseline rather than comparing models on the empty E1 index.
+The English internal prototype completed Phases 1–12 of `PLAN.md`. The original Phase 13 deployment work and its deferred follow-up backlog move here because deployment is not currently planned. The isolated E1 stack now starts and answers safely with an empty corpus; the developer does not want to insert Sardars data merely to close E1. E2 compared the retained original corpus on the same Ollama server; the developer selected 4B for the current local Docker application despite slower measured responses and unchanged automated scores. See `docs/e2_model_comparison.md`. Decide the ingestion runner in E3 and build the account-registration-to-RAG journey in E4. After Sardars data is entered through that journey, return to the remaining E1 end-to-end, restart and backup/restore checks **before** advancing to E5. Reassess retrieval and tool choice with that richer corpus before adding optional capabilities. Production deployment is a separate, later decision. This resequencing does **not** mark E1 or E3/E4 complete or clear the six remaining full-site evaluation failures.
 
 Work in small, runnable checkpoints. Before each substantial change, explain the concept, alternatives and trade-offs. Keep a measured baseline and run the relevant regression suites after changes. Update `IMPLEMENTATION_STATUS.md` only after a verified major checkpoint, and update this plan when an exit criterion or order changes. The sequence below may change when measurements or developer decisions justify it.
 
@@ -30,12 +30,14 @@ Exit, checked **after E4**: a developer can start the complete internal applicat
 
 Goal: test whether a larger local chat model produces better grounded answers on this hardware.
 
-- [ ] Freeze the current prompts, retrieval corpus, tool rules and case definitions; record the active model, quantization, memory use and repeatable `qwen3:0.6b` baseline.
-- [ ] Compare an available 4B-class Qwen instruct model first, then an 8B-class or other open-weight option only if hardware and latency permit. Keep the embedding model/collection unchanged during the chat-model comparison.
-- [ ] Run the same 26-case chat, seven-case seed and 40-case full-site suites, plus a small blinded human review of real staff questions. Compare factual support, citations, abstentions, unsafe claims, phrasing, follow-ups, tool-choice outcomes, median/p95 latency, timeouts and memory/swap pressure. Recheck model response and tool-call formats through the Ollama adapter.
-- [ ] Adopt a new default only when its measured quality gain is worth the resource cost and security/authorization checks remain passing; otherwise retain the current model and record why.
+- [x] Freeze the current prompts, retrieval corpus, tool rules and case definitions; record the active model, quantization, memory use and repeatable `qwen3:0.6b` baseline.
+- [x] Compare an available 4B-class Qwen instruct model first, then an 8B-class or other open-weight option only if hardware and latency permit. Keep the embedding model/collection unchanged during the chat-model comparison. The observed 4B latency on this CPU ruled out an 8B run here.
+- [x] Run the same 26-case chat, seven-case seed and 40-case full-site suites, plus a blinded comparison of real staff questions. All eight staff answer/citation pairs were exactly identical, so they were scored as objective ties without separate subjective human grading. Compare factual support, citations, abstentions, unsafe claims, phrasing, follow-ups, tool-choice outcomes, median/p95 latency, timeouts and memory/swap pressure. Recheck model response and tool-call formats through the Ollama adapter. Independent human review after E4's richer data remains open.
+- [x] Make a documented local model choice from measured quality, resource cost and developer preference while keeping security/authorization checks passing. The developer selected 4B for the current Docker application despite its higher latency; the shared code fallback remains 0.6B for other environments.
 
 Exit: a documented model choice based on comparable results. A larger model alone does not fix missing retrieval evidence or the application's rule-based tool routing.
+
+E2 completed on 2026-10-19 for the retained corpus/current CPU. Both models passed 26/26 chat and 7/7 seed cases, and each passed 34/40 full-site cases with the same six failures. Eight blinded staff pairs had identical text and citations; the developer confirmed recording these as exact ties in place of subjective human scoring, a change to the review method rather than a claim of independent human approval. The developer selected 4B for the current local Docker application despite slower model-invoking turns and no measured correctness gain; retest it after E4 or on stronger hardware if useful. See `docs/e2_model_comparison.md` for the full evidence and limits.
 
 ## E3 — Decide how ingestion work runs
 
