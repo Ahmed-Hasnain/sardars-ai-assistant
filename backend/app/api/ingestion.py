@@ -195,6 +195,11 @@ async def remove(identity: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")], user
     return await call(service.remove, db, settings, user, identity)
 
 
+@router.post("/sources/{identity}/restore")
+async def restore(identity: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")], user: AdminUser, db: DB, settings: Config) -> dict:
+    return await call(service.restore_url, db, settings, user, identity)
+
+
 @router.get("/files/{file_id}")
 def content(file_id: UUID, user: CurrentUser, db: DB, settings: Config) -> Response:
     url = FILE_PREFIX + str(file_id)

@@ -295,3 +295,7 @@ export function retryIngestionJob(token: string, id: string): Promise<IngestionJ
 export function removeIngestedSource(token: string, id: string): Promise<IngestionJob> {
   return ingestionRequest(token, `/sources/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
+
+export function restoreIngestedSource(token: string, id: string): Promise<IngestionJob> {
+  return ingestionRequest(token, `/sources/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+}

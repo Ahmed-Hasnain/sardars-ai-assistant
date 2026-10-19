@@ -25,6 +25,7 @@ class SourceWork:
     generation: str | None
     registration: str
     visibility: str = "public"
+    restore_removed: bool = False
 
 
 def source_record(db: Session, url: str, *, lock: bool = False, internal: bool = False) -> SourceRegistration | None:
@@ -47,6 +48,20 @@ def check_available(db: Session, source: SourceRegistration | None, run_id: str 
         owner = db.get(IngestionJob, source.index_job_id)
         if owner and owner.status == "processing" and owner.lease_expires_at and utc(owner.lease_expires_at) > now():
             raise ValueError("Source is being processed by another job")
+
+
+def can_restore(db: Session, source: SourceRegistration | None, run_id: str | None = None) -> bool:
+    """Only a completed removal or failed restoration may be explicitly restored."""
+    if source is None or source.is_active or source.index_job_id is None:
+        return False
+    owner = db.get(IngestionJob, source.index_job_id)
+    if owner is None:
+        return False
+    if run_id is not None and owner.id == run_id:
+        return source.index_status in {"indexing", "failed"}
+    return ((source.index_status == "removed" and owner.operation == "remove" and owner.status == "completed")
+            or (source.index_status == "failed" and owner.operation == "import" and owner.status == "failed"
+                and isinstance(owner.request, dict) and owner.request.get("restore_removed") is True))
 
 
 def preview(db: Session, request: JobRequest) -> dict:
@@ -92,7 +107,9 @@ def stage(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer)
             registration = "new" if source is None else "existing"
             basis = source.authorization_basis if source else "authenticated_internal_submission" if user else AUTHORIZATION_BASIS
             if document:
-                if source and not source.is_active:
+                if run.request.restore_removed and (user is None or user.role != "admin" or not can_restore(db, source, run.id)):
+                    raise ValueError("Removed source cannot be restored by this job")
+                if source and not source.is_active and not run.request.restore_removed:
                     raise ValueError("Source is disabled; import cannot reactivate it")
                 if source and source.fetched_at and document.fetched_at < utc(source.fetched_at):
                     raise ValueError("Source snapshot is older than the registered version")
@@ -126,7 +143,8 @@ def stage(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexer)
                     source.is_active, source.index_status = False, "removed"
             if source:
                 source.index_job_id = run.id
-            work.append(SourceWork(source_id(url), url, basis, action, chunks, generation, registration, source.visibility if source else "public"))
+            work.append(SourceWork(source_id(url), url, basis, action, chunks, generation, registration,
+                                   source.visibility if source else "public", run.request.restore_removed))
         job.result = {"sources": [{"source_id": item.source_id, "url": item.url, "index_action": item.action} for item in work]}
     # This commit is the retrieval barrier: indexing/removed sources are now hidden.
     return work
@@ -141,7 +159,8 @@ def check_ownership(sessions: sessionmaker[Session], run: JobRun, work: list[Sou
             if source is None:
                 if item.action != "removed":
                     raise ValueError("Source disappeared during processing")
-            elif (source.visibility != item.visibility or source.index_job_id != run.id or (item.action != "removed" and not source.is_active)
+            elif (source.visibility != item.visibility or source.index_job_id != run.id
+                  or (item.action != "removed" and source.is_active == item.restore_removed)
                   or (item.action == "removed" and source.is_active)
                   or (item.action != "removed" and (source.index_generation != item.generation
                       or source.index_status != "indexing" or source.content_sha256 != item.chunks[0]["content_sha256"]
@@ -195,6 +214,7 @@ def process(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexe
         "status": "completed", "operation": run.request.operation,
         "new_sources": sum(item.registration == "new" for item in work) if run.request.operation == "import" else 0,
         "updated_sources": sum(item.registration == "updated" for item in work),
+        "restored_sources": sum(item.restore_removed for item in work),
         "indexed_chunks": len(to_index), "skipped_sources": sum(item.action == "skipped" for item in work),
         "skipped_chunks": sum(len(item.chunks) for item in work if item.action == "skipped"),
         "removed_sources": len(work) if run.request.operation == "remove" else 0, "deleted_chunks": deleted,
@@ -208,7 +228,8 @@ def process(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexe
             source = source_record(db, item.url, lock=True, internal=run.request.scope == "internal")
             if source is None and item.action != "removed":
                 raise ValueError("Source disappeared before publication")
-            if source and (source.visibility != item.visibility or source.index_job_id != run.id or (item.action != "removed" and not source.is_active)
+            if source and (source.visibility != item.visibility or source.index_job_id != run.id
+                           or (item.action != "removed" and source.is_active == item.restore_removed)
                            or (item.action == "removed" and source.is_active)
                            or (item.action != "removed" and (source.index_generation != item.generation
                                or source.index_status != "indexing" or source.content_sha256 != item.chunks[0]["content_sha256"]
@@ -221,6 +242,8 @@ def process(sessions: sessionmaker[Session], run: JobRun, indexer: WebsiteIndexe
                 if item.action == "indexed":
                     source.last_indexed_at = now()
                 if item.action != "removed":
+                    if item.restore_removed:
+                        source.is_active = True
                     source.index_status = "ready"
         job.status, job.result, job.finished_at = "completed", result, now()
     return result

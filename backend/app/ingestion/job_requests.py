@@ -52,6 +52,7 @@ class JobRequest(BaseModel):
     urls: list[str] = Field(default_factory=list, max_length=10)
     staged: StagedSource | None = None
     crawl: SitemapSubmission | None = None
+    restore_removed: bool = False
 
     @model_validator(mode="after")
     def check_request(self) -> Self:
@@ -73,6 +74,9 @@ class JobRequest(BaseModel):
             raise ValueError("Local public-site imports require crawler documents")
         if self.scope == "internal" and any(not isinstance(doc, SuppliedDocument) for doc in self.documents):
             raise ValueError("Internal imports require supplied document provenance")
+        if self.restore_removed and (self.operation != "import" or self.scope != "internal"
+                                     or len(urls) != 1 or file_url(urls[0])):
+            raise ValueError("Only one internal website source can be restored")
         invalid_url = any(len(url) > 2048 or (source_type(url) is None if self.scope == "public_site" else not (valid_web_url(url) or file_url(url))) for url in urls)
         if len(set(urls)) != len(urls) or invalid_url:
             raise ValueError("Select unique owner-authorized descriptive Sardars URLs")
@@ -86,6 +90,8 @@ class JobRequest(BaseModel):
             del value["staged"]
         if value["crawl"] is None:
             del value["crawl"]
+        if not value["restore_removed"]:
+            del value["restore_removed"]
         if len(json.dumps(value, ensure_ascii=False).encode()) > MAX_JOB_BYTES:
             raise ValueError("Job snapshot exceeds the size limit")
         return value

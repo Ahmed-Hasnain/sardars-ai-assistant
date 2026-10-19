@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   getIngestionJob, listCrawlPages, listIngestedSources, listIngestionJobs,
-  removeIngestedSource, retryIngestionJob, submitIngestionFile, submitIngestionUrl, submitSitemap,
+  removeIngestedSource, restoreIngestedSource, retryIngestionJob, submitIngestionFile, submitIngestionUrl, submitSitemap,
   type IngestedSource, type IngestionJob,
 } from './api'
 
@@ -108,6 +108,11 @@ export default function KnowledgePanel({ token }: { token: string }) {
     await run(() => removeIngestedSource(token, source.source_id), 'Source removal submitted.')
   }
 
+  async function restore(source: IngestedSource) {
+    if (!window.confirm(`Restore “${source.title || source.url}” by fetching and indexing it again?`)) return
+    await run(() => restoreIngestedSource(token, source.source_id), 'Source restoration submitted.')
+  }
+
   return (
     <section className="knowledge-panel" aria-label="Knowledge ingestion" ref={panelRef}>
       <div className="knowledge-heading"><div className="eyebrow">ADMIN WORKSPACE</div><h1>Knowledge sources</h1>
@@ -125,7 +130,7 @@ export default function KnowledgePanel({ token }: { token: string }) {
           <button type="submit" disabled={busy}>{replaceSource ? 'Replace file' : 'Upload file'}</button>
         </form>
         <form className="knowledge-card" onSubmit={uploadPage}>
-          <h2>Add a website page</h2><p>One direct HTTPS page on an allowed host. The worker checks robots rules and extracts descriptive text.</p>
+          <h2>Add a website page</h2><p>One direct HTTPS page on an allowed host. The worker checks robots rules and extracts descriptive text. To re-add a removed page, use Restore in Registered sources.</p>
           <label htmlFor="knowledge-page-url">Page URL</label><input id="knowledge-page-url" type="url" value={pageUrl} placeholder="https://sardarandco.com/pages/about-us" onChange={(event) => setPageUrl(event.target.value)} required />
           <label htmlFor="knowledge-page-visibility">Visible to</label><select id="knowledge-page-visibility" value={pageVisibility} onChange={(event) => setPageVisibility(event.target.value as Visibility)}>
             <option value="staff">Staff and admins</option><option value="admin">Admins only</option></select>
@@ -160,6 +165,7 @@ export default function KnowledgePanel({ token }: { token: string }) {
           {sources.length === 0 && <p>No sources indexed yet.</p>}
           {sources.map((source) => <div key={source.source_id} className="knowledge-source"><div><strong>{source.title || source.url}</strong><small>{source.source_type} · {source.visibility} · {source.index_status}</small></div>
             {source.active && source.url.startsWith('/api/v1/ingestion/files/') && source.visibility !== 'public' && <button type="button" disabled={busy} onClick={() => { setReplaceSource(source); setFileVisibility(source.visibility as Visibility); panelRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); fileInputRef.current?.focus() }}>Replace</button>}
+            {!source.active && source.url.startsWith('https://') && ['removed', 'failed'].includes(source.index_status) && <button type="button" disabled={busy} onClick={() => void restore(source)}>Restore</button>}
             {source.active && <button type="button" disabled={busy} onClick={() => void remove(source)}>Remove</button>}
           </div>)}
           {sourceOffset > 0 && <button onClick={() => setSourceOffset(Math.max(0, sourceOffset - 100))}>Previous sources</button>}

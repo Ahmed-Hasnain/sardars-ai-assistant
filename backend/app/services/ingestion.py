@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 from app.db.models import IngestionJob, SourceRegistration, User
 from app.ingestion.access import can_manage, can_read, check_submission
-from app.ingestion.documents import FILE_PREFIX, SuppliedDocument, file_url
+from app.ingestion.documents import FILE_PREFIX, SuppliedDocument, file_url, valid_web_url
 from app.ingestion.extraction import extract_file, extract_url, file_format, storage_path, store_original
 from app.ingestion.extract_worker import MAX_FILE_BYTES
 from app.ingestion.job_requests import JobRequest, StagedSource, source_id
@@ -20,6 +20,7 @@ from app.ingestion.job_runner import JobFailed, run_job
 from app.ingestion.job_store import enqueue, now, requeue
 from app.ingestion.public_site import source_type
 from app.ingestion.site_index import WebsiteIndexer
+from app.ingestion.sync_sources import can_restore
 from app.schemas.ingestion import FileSubmission, URLSubmission, SitemapSubmission
 
 
@@ -45,7 +46,10 @@ def preflight(sessions: sessionmaker[Session], user_id: int, url: str, visibilit
             check_submission(user, source, visibility)
         except ValueError as exc:
             raise HTTPException(403, "Source submission is not permitted") from exc
-        if source and (not source.is_active or source.source_type != kind):
+        if source and not source.is_active:
+            raise HTTPException(409, "Source was removed; use Restore in Registered sources"
+                                if valid_web_url(url) else "Source is disabled or its format conflicts with this import")
+        if source and source.source_type != kind:
             raise HTTPException(409, "Source is disabled or its format conflicts with this import")
 
 
@@ -125,6 +129,25 @@ def import_url(sessions: sessionmaker[Session], settings: Settings, user_id: int
     raw, title, text = extract_url(submission.url, settings)
     return submit(sessions, settings, user_id, raw=raw, text=text, title=title, url=submission.url,
                   kind=kind, visibility=submission.visibility, filename="page.html", media_type="text/html")
+
+
+def restore_url(sessions: sessionmaker[Session], settings: Settings, user_id: int, identity: str) -> dict:
+    with sessions() as db:
+        user = load_user(db, user_id)
+        if user.role != "admin":
+            raise HTTPException(403, "Admin access required")
+        source = manageable(db, user, identity)
+        if (not valid_web_url(source.url) or source.source_type not in {"web", "pages", "articles", "products"}
+            or urlsplit(source.url).hostname not in settings.ingestion_url_hosts):
+            raise HTTPException(409, "Only a configured website source can be restored")
+        if not can_restore(db, source):
+            raise HTTPException(409, "Wait for removal to finish, or choose a removed website source")
+        url, kind, visibility = source.url, source.source_type, source.visibility
+    staged = StagedSource(url=url, source_type=kind, visibility=visibility,
+                          title="Pending restored page", original_filename="page.html", media_type="text/html")
+    job_id = enqueue(sessions, JobRequest(operation="import", scope="internal", staged=staged, restore_removed=True),
+                     submitted_by_user_id=user_id)
+    return {"job_id": job_id, "status": "pending"} if settings.ingestion_runner == "worker" else execute(sessions, settings, job_id)
 
 
 def submit_sitemap(sessions: sessionmaker[Session], settings: Settings, user_id: int,

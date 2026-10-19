@@ -14,7 +14,7 @@ from app.ingestion.extraction import ExtractionError, extract_file, extract_url,
 from app.ingestion.extract_worker import MAX_FILE_BYTES
 from app.ingestion.job_requests import JobRequest, source_id
 from app.ingestion.job_store import JobRun, now, require_run, transaction
-from app.ingestion.sync_sources import source_record
+from app.ingestion.sync_sources import can_restore, source_record
 
 MIN_SITEMAP_PAGE_DELAY_SECONDS = 0.5
 
@@ -29,7 +29,12 @@ def materialize(sessions: sessionmaker[Session], run: JobRun, settings: Settings
         is_sitemap_page = job.parent_job_id is not None
         source = source_record(db, staged.url, lock=True, internal=True)
         check_submission(user, source, staged.visibility)
-        if source and (not source.is_active or source.source_type != staged.source_type):
+        if source and source.source_type != staged.source_type:
+            raise ValueError("Source is disabled or its format changed")
+        if run.request.restore_removed:
+            if user.role != "admin" or not can_restore(db, source, run.id):
+                raise ValueError("Removed source cannot be restored by this job")
+        elif source and not source.is_active:
             raise ValueError("Source is disabled or its format changed")
 
     created_key = None
@@ -62,13 +67,19 @@ def materialize(sessions: sessionmaker[Session], run: JobRun, settings: Settings
             original_filename=staged.original_filename, media_type=staged.media_type,
             file_sha256=checksum,
         )
-        request = JobRequest(operation="import", scope="internal", documents=[document])
+        request = JobRequest(operation="import", scope="internal", documents=[document],
+                             restore_removed=run.request.restore_removed)
         with transaction(sessions) as db:
             job = require_run(db, run)
             user = actor(db, job)
             source = source_record(db, staged.url, lock=True, internal=True)
             check_submission(user, source, staged.visibility)
-            if source and (not source.is_active or source.source_type != staged.source_type):
+            if source and source.source_type != staged.source_type:
+                raise ValueError("Source is disabled or its format changed")
+            if run.request.restore_removed:
+                if user.role != "admin" or not can_restore(db, source, run.id):
+                    raise ValueError("Removed source cannot be restored by this job")
+            elif source and not source.is_active:
                 raise ValueError("Source is disabled or its format changed")
             job.request = request.snapshot()
     except Exception:

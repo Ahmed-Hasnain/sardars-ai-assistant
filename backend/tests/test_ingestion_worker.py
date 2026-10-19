@@ -133,3 +133,99 @@ def test_url_fetch_happens_in_worker_and_source_is_queued_without_text(runtime, 
     with sessions() as db:
         source = db.scalar(select(SourceRegistration).where(SourceRegistration.url == url))
         assert source.index_status == "ready" and source.storage_key
+
+
+def test_removed_page_requires_explicit_admin_restore_and_keeps_identity(runtime, monkeypatch):
+    client, sessions, settings, services, headers = runtime
+    settings.ingestion_runner = "worker"
+    url = "https://sardarandco.com/pages/about-us"
+    monkeypatch.setattr("app.ingestion.materialize.extract_url", lambda *_args: (
+        b"<html><main>About Sardars</main></html>", "About Sardars", "Sardars describes bathroom products."
+    ))
+    created = client.post("/api/v1/ingestion/urls", headers=headers["admin"], json={"url": url})
+    assert created.status_code == 202
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        source = db.scalar(select(SourceRegistration).where(SourceRegistration.url == url))
+        identity = source.source_id
+        assert source.is_active and source.index_status == "ready"
+    assert services.points
+
+    removed = client.delete(f"/api/v1/ingestion/sources/{identity}", headers=headers["admin"])
+    assert removed.status_code == 202
+    assert client.post(f"/api/v1/ingestion/sources/{identity}/restore", headers=headers["admin"]).status_code == 409
+    assert run_once(sessions, settings, services)
+    assert not services.points
+    assert client.post("/api/v1/ingestion/urls", headers=headers["admin"], json={"url": url}).status_code == 409
+    assert client.post(f"/api/v1/ingestion/sources/{identity}/restore", headers=headers["staff"]).status_code == 403
+
+    restored = client.post(f"/api/v1/ingestion/sources/{identity}/restore", headers=headers["admin"])
+    assert restored.status_code == 202
+    with sessions() as db:
+        source = db.get(SourceRegistration, identity)
+        job = db.get(IngestionJob, restored.json()["job_id"])
+        assert not source.is_active and source.index_status == "removed"
+        assert job.request["restore_removed"] is True and job.request["staged"]["url"] == url
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        source = db.get(SourceRegistration, identity)
+        job = db.get(IngestionJob, restored.json()["job_id"])
+        assert source.is_active and source.index_status == "ready" and source.index_job_id == job.id
+        assert job.status == "completed" and job.result["restored_sources"] == 1
+    assert len(services.points) == 1
+
+
+def test_failed_page_restore_stays_hidden_and_can_retry(runtime, monkeypatch):
+    client, sessions, settings, services, headers = runtime
+    settings.ingestion_runner = "worker"
+    url = "https://sardarandco.com/pages/about-us"
+    monkeypatch.setattr("app.ingestion.materialize.extract_url", lambda *_args: (
+        b"<html><main>About Sardars</main></html>", "About Sardars", "Sardars describes bathroom products."
+    ))
+    assert client.post("/api/v1/ingestion/urls", headers=headers["admin"], json={"url": url}).status_code == 202
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        identity = db.scalar(select(SourceRegistration).where(SourceRegistration.url == url)).source_id
+    assert client.delete(f"/api/v1/ingestion/sources/{identity}", headers=headers["admin"]).status_code == 202
+    assert run_once(sessions, settings, services)
+    restored = client.post(f"/api/v1/ingestion/sources/{identity}/restore", headers=headers["admin"])
+    job_id = restored.json()["job_id"]
+    services.fail_path = "/api/embed"
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        source = db.get(SourceRegistration, identity)
+        assert not source.is_active and source.index_status == "failed"
+        assert db.get(IngestionJob, job_id).status == "failed"
+    services.fail_path = None
+    assert client.post(f"/api/v1/ingestion/jobs/{job_id}/retry", headers=headers["admin"]).status_code == 202
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        source = db.get(SourceRegistration, identity)
+        assert source.is_active and source.index_status == "ready"
+        assert db.get(IngestionJob, job_id).status == "completed"
+
+
+def test_restore_waits_for_failed_removal_cleanup(runtime, monkeypatch):
+    client, sessions, settings, services, headers = runtime
+    settings.ingestion_runner = "worker"
+    url = "https://sardarandco.com/pages/about-us"
+    monkeypatch.setattr("app.ingestion.materialize.extract_url", lambda *_args: (
+        b"<html><main>About Sardars</main></html>", "About Sardars", "Sardars describes bathroom products."
+    ))
+    assert client.post("/api/v1/ingestion/urls", headers=headers["admin"], json={"url": url}).status_code == 202
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        identity = db.scalar(select(SourceRegistration).where(SourceRegistration.url == url)).source_id
+    removal = client.delete(f"/api/v1/ingestion/sources/{identity}", headers=headers["admin"])
+    removal_id = removal.json()["job_id"]
+    services.fail_path = "/delete"
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        source = db.get(SourceRegistration, identity)
+        assert not source.is_active and source.index_status == "removed"
+        assert db.get(IngestionJob, removal_id).status == "failed"
+    assert client.post(f"/api/v1/ingestion/sources/{identity}/restore", headers=headers["admin"]).status_code == 409
+    services.fail_path = None
+    assert client.post(f"/api/v1/ingestion/jobs/{removal_id}/retry", headers=headers["admin"]).status_code == 202
+    assert run_once(sessions, settings, services)
+    assert client.post(f"/api/v1/ingestion/sources/{identity}/restore", headers=headers["admin"]).status_code == 202

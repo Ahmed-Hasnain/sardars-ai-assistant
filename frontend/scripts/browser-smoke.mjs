@@ -92,6 +92,9 @@ async function adminKnowledgeScenario(browser) {
   let job = null
   let submittedFile = false
   let submittedSitemap = false
+  let submittedRestore = false
+  const removedSource = { source_id: 'c'.repeat(64), title: 'About us', url: 'https://sardarandco.com/pages/about-us',
+    source_type: 'pages', visibility: 'staff', active: false, index_status: 'removed', job_id: null }
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -99,7 +102,13 @@ async function adminKnowledgeScenario(browser) {
     if (path === '/api/v1/auth/me') return route.fulfill(json({ id: 2, email: 'admin@example.com', role: 'admin', is_active: true }))
     if (path === '/api/v1/conversations') return route.fulfill(json([]))
     if (path === '/api/v1/ingestion/jobs' && request.method() === 'GET') return route.fulfill(json(job ? [job] : []))
-    if (path === '/api/v1/ingestion/sources') return route.fulfill(json([]))
+    if (path === '/api/v1/ingestion/sources') return route.fulfill(json([removedSource]))
+    if (path === `/api/v1/ingestion/sources/${removedSource.source_id}/restore` && request.method() === 'POST') {
+      assert.equal(request.headers().authorization, 'Bearer admin-test-token')
+      submittedRestore = true
+      job = { job_id: id, operation: 'import', status: 'pending', attempts: 0, max_attempts: 3, error: null }
+      return route.fulfill(json(job, 202))
+    }
     if (path === '/api/v1/ingestion/files' && request.method() === 'POST') {
       assert.equal(request.headers().authorization, 'Bearer admin-test-token')
       assert.match(request.headers()['content-type'], /^multipart\/form-data;/)
@@ -141,6 +150,10 @@ async function adminKnowledgeScenario(browser) {
   await page.getByText('Pages: 1 completed, 0 failed, 1 pending').waitFor()
   await page.getByText('https://sardarandco.com/pages/about-us').waitFor()
   assert.equal(submittedSitemap, true)
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Restore' }).click()
+  await page.getByText('Source restoration submitted.').waitFor()
+  assert.equal(submittedRestore, true)
   await context.close()
 }
 
@@ -151,7 +164,7 @@ try {
   await scenario(browser, { width: 1440, height: 900 })
   await scenario(browser, { width: 390, height: 844 })
   await adminKnowledgeScenario(browser)
-  console.log('Desktop/mobile chat and admin knowledge smoke passed: login, retry, streamed answer, citations, authenticated file download, refresh, history, file upload, sitemap progress, keyboard focus and layout.')
+  console.log('Desktop/mobile chat and admin knowledge smoke passed: login, retry, streamed answer, citations, authenticated file download, refresh, history, file upload, sitemap progress, source restore, keyboard focus and layout.')
 } finally {
   await browser?.close()
   vite.kill('SIGTERM')
