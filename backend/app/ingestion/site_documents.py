@@ -17,6 +17,9 @@ from app.ingestion.public_site import source_type
 
 MAX_DOCUMENT_CHARS = 50_000
 MAX_DOCUMENT_WORDS = 10_000
+# Larger curated UTF-8 uploads remain bounded separately from crawled pages/PDFs.
+MAX_TEXT_UPLOAD_CHARS = 250_000
+MAX_TEXT_UPLOAD_WORDS = 30_000
 
 
 class DescriptiveDerivation(BaseModel):

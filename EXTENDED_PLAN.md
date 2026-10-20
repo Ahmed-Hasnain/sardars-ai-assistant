@@ -1,13 +1,13 @@
 # Sardars AI Assistant — extended plan
 
-Last reviewed: 2026-10-19
-Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 model comparison complete on current laptop; E3 is next
+Last reviewed: 2026-10-20
+Status: active roadmap; E1 isolated stack is runnable, with final data-backed acceptance deferred until after E4; E2 and E3 complete on current laptop; E4 admin upload/sitemap workflow implemented, real-data acceptance open
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
 ## Purpose and order
 
-The English internal prototype completed Phases 1–12 of `PLAN.md`. The original Phase 13 deployment work and its deferred follow-up backlog move here because deployment is not currently planned. The isolated E1 stack now starts and answers safely with an empty corpus; the developer does not want to insert Sardars data merely to close E1. E2 compared the retained original corpus on the same Ollama server; the developer selected 4B for the current local Docker application despite slower measured responses and unchanged automated scores. See `docs/e2_model_comparison.md`. Decide the ingestion runner in E3 and build the account-registration-to-RAG journey in E4. After Sardars data is entered through that journey, return to the remaining E1 end-to-end, restart and backup/restore checks **before** advancing to E5. Reassess retrieval and tool choice with that richer corpus before adding optional capabilities. Production deployment is a separate, later decision. This resequencing does **not** mark E1 or E3/E4 complete or clear the six remaining full-site evaluation failures.
+The English internal prototype completed Phases 1–12 of `PLAN.md`. The original Phase 13 deployment work and its deferred follow-up backlog move here because deployment is not currently planned. The isolated E1 stack now starts and answers safely with an empty corpus; the developer does not want to insert Sardars data merely to close E1. E2 compared the retained original corpus on the same Ollama server; the developer selected 4B for the current local Docker application despite slower measured responses and unchanged automated scores. See `docs/e2_model_comparison.md`. E3 selected a dedicated PostgreSQL-polling ingestion worker for the local Compose stack; see `docs/e3_ingestion_runner.md`. E4 now builds an **existing-admin-to-RAG** journey; self-registration and admin approval are deferred. After Sardars data is entered through that journey, return to the remaining E1 end-to-end, restart and backup/restore checks **before** advancing to E5. E5 will measure and improve grounded answer composition from retrieved evidence; E6 will then measure bounded model-assisted follow-up retrieval and read-tool choice while the application retains its initial routing and exact-fact safeguards. Production deployment is a separate, later decision. This does **not** mark E1 or E4 complete or clear the six remaining full-site evaluation failures.
 
 Work in small, runnable checkpoints. Before each substantial change, explain the concept, alternatives and trade-offs. Keep a measured baseline and run the relevant regression suites after changes. Update `IMPLEMENTATION_STATUS.md` only after a verified major checkpoint, and update this plan when an exit criterion or order changes. The sequence below may change when measurements or developer decisions justify it.
 
@@ -41,50 +41,57 @@ E2 completed on 2026-10-19 for the retained corpus/current CPU. Both models pass
 
 ## E3 — Decide how ingestion work runs
 
-Goal: make larger uploads and sitemap imports reliable before building the registration/ingestion UI. The current API records durable jobs but still waits for extraction and indexing in the request; measure whether a separate worker is needed.
+Goal: make larger uploads and sitemap imports reliable before building the ingestion UI. Before this checkpoint, the API recorded durable jobs but still waited for extraction and indexing in the request; measure whether a separate worker was needed.
 
-- [ ] Measure current durable-job runtime, request blocking, queueing, retry/recovery and CPU/memory use on controlled files and sitemap samples representative of the Sardars data to be ingested.
-- [ ] Compare the existing synchronous runner, a small dedicated worker and Celery with a broker. Choose the least complex option that meets the measured workload.
-- [ ] If Celery is selected, add a broker and worker to the local Compose stack in a small runnable checkpoint. Pass job IDs rather than document text through the broker; let the API return an accepted job ID and let the UI poll the existing authorized job endpoint. Verify restart/retry behavior before relying on the worker for bulk imports.
-- [ ] Preserve owner/role checks, leases, idempotency, bounded retries, progress, update/deletion and safe publication between PostgreSQL and Qdrant. A failed job must not expose partial or unauthorized content.
+- [x] Measure current durable-job runtime, request blocking, queueing, retry/recovery and CPU/memory use on controlled files and saved-crawl samples. A live sitemap API/crawl does not yet exist and remains E4 work.
+- [x] Compare the existing synchronous runner, a small dedicated worker and Celery with a broker. Select one PostgreSQL-polling worker for the local workload; defer Celery/Redis until E4 measurements demonstrate a need.
+- [x] Apply the selected runner in the local Compose stack. The API returns HTTP 202 with a job ID, and the UI can poll the existing authorized job endpoint. Celery's broker-specific step is not applicable to this selection.
+- [x] Preserve owner/role checks, leases, idempotency, bounded retries, status, update/deletion and safe publication between PostgreSQL and Qdrant. A failed job must not expose partial or unauthorized content.
 
 Exit: a documented runner choice and tested recovery for the selected workload. Celery/Redis are strong candidates for lengthy imports, but remain conditional until the E3 comparison demonstrates the need and verifies their failure behavior.
 
-## E4 — Fresh-account-to-ingestion journey
+E3 completed on 2026-10-19 for the current single-worker local workload. Controlled file, saved-crawl and embedding probes established the request-blocking baseline; the dedicated worker passed focused tests, the full backend regression suite, and a disposable-PostgreSQL recovery/update/removal check. The API and worker started in Compose without adding any source or Qdrant points to E1. See `docs/e3_ingestion_runner.md` for measurements and limits. E4 must measure its new sitemap crawl and real bulk-submission workload before deciding whether broker-based scaling is needed.
 
-Goal: complete the path from a newly approved internal account through Sardars company-data submission, RAG ingestion and authorized answers.
+## E4 — Admin-to-ingestion journey
 
-- [ ] Add an internal registration request that creates an inactive/pending account; an existing admin must approve and assign staff access before login or ingestion. The first admin remains operator-created. Rate-limit registration and prevent role self-assignment. Define whether submitted sources are staff-shared or admin-only; public customer access remains deferred.
+Goal: let an existing admin submit Sardars company data through the browser, have the E3 worker index it, and receive authorized cited answers. Account self-registration and approval are later work; the first admin remains operator-created.
+
 - [ ] Inventory the available Sardars files, URLs and sitemap; identify descriptive claims, source authority, visibility, formats, duplicates and update/freshness rules. Save representative questions and the current answers before ingestion so improvements can be measured. Company documents do not replace PostgreSQL for current price, SKU or stock.
-- [ ] Add registration and pending/approval UI, then file/URL/sitemap submission UI for approved admins and staff, plus source list, job status, retry and removal controls. Reuse the existing authenticated ingestion and job endpoints where possible; adapt submission to the E3 runner. Extend the bounded single-URL importer into an authenticated crawl with domain, robots, size and page limits; durably stage crawl references before indexing. Decide DOCX/OCR separately.
+- [ ] Add an admin-only browser screen for PDF/TXT/Markdown file and single-URL submission, source list, job status, retry and removal controls. Reuse the existing authenticated ingestion and job endpoints, which already submit to the E3 worker in Compose. Preserve application role/source checks; changing existing staff API permissions is a separate decision. Decide DOCX/OCR support separately rather than implying they already work.
+- [ ] Extend the bounded single-URL importer into an admin-submitted sitemap crawl that discovers eligible URLs, queues bounded page batches through the worker, and shows aggregate progress and failures. Enforce configured domain, robots, response-size, page-count, crawl-delay and retry limits; durably record crawl references and preserve each page's source identity and provenance before indexing. A saved-crawl CLI does not satisfy this browser-to-worker path.
 - [ ] Use the selected runner to ingest a small Sardars sample first, inspect extraction/chunks/citations and role visibility, then import the remaining authorized sources in bounded batches. Preserve stable source IDs, provenance, progress, retries and update/deletion. Use external original-document storage only if measured size/operational needs justify it.
 - [ ] Reask the saved questions after each batch; compare grounded answer quality, retrieval/source hits, unsupported claims and latency with the pre-ingestion results and the retained chat/seed/full-site suites. Diagnose any remaining failures by layer rather than assuming more data guarantees better answers.
 - [ ] For any requested fresh-start exercise, first inventory and back up RAG tables, originals and Qdrant; write a reversible, exact reset scope and verify restore before clearing data. Preserve users, conversations and authoritative products unless explicitly included in an approved reset.
 
-Exit: a newly approved internal account can submit supported Sardars content, observe completion and retrieve only visible indexed sources; failures, revocation and updates behave correctly. Before/after evaluation shows where the new data improved answers and what still fails.
+Exit: an existing admin can submit supported files, individual URLs and a bounded sitemap through the browser, observe worker completion, and retrieve only visible indexed sources; failures, revocation and updates behave correctly. Before/after evaluation shows where the new data improved answers and what still fails. Registration and account approval are outside this exit.
+
+E4 implementation checkpoint (2026-10-19): the admin browser workflow, worker-backed sitemap parent/child jobs, bounded discovery, progress and retry are implemented and covered by backend/frontend/mocked-browser tests. The isolated stack was rebuilt and checked with its existing 4,983 products intact and no new RAG sources. The checklist and E4 exit remain open for the developer's real Sardars files/site, live credentialed ingestion, source/answer inspection and before/after evaluation. See `docs/e4_admin_ingestion_checkpoint.md`.
 
 After this exit, finish and record the deferred E1 data-backed checks above. Do not infer E1 completion from E4's UI or job status alone.
 
 ## E5 — Close full-corpus retrieval and evidence regressions
 
-Goal: resolve the six retained full-site failures and any newly measured retrieval/evidence failures after Sardars data ingestion, without weakening source checks.
+Goal: resolve the six retained full-site failures and any newly measured retrieval/evidence failures after Sardars data ingestion, and improve how the model turns sufficient evidence into a useful cited answer without weakening source checks.
 
-- [ ] Reproduce each saved-crawl and seed failure, recording whether the case is evaluated against the original or newly expanded corpus. Classify source extraction and coverage, ranking, evidence selection, citation identity, answer generation and service errors separately.
+- [ ] Reproduce each saved-crawl and seed failure, recording whether the case is evaluated against the original or newly expanded corpus. Add real Sardars brand, company-overview and other descriptive questions with current answer, retrieved source, model use, citation and latency baselines. Classify source extraction and coverage, ranking, evidence selection, citation identity, answer generation and service errors separately.
 - [ ] Change the failing layer in bounded increments; compare relevance and abstention, and distinguish another authorized citation from absent evidence. Consider hybrid retrieval or another reranking method only if the measured failures justify it.
-- [ ] Rerun the same full-site, chat and seed suites after each accepted change; check role/source revocation, prompt injection, unsupported changing facts and latency.
+- [ ] Evaluate a shared, structure-aware chunking policy before changing the index: keep FAQ question/answer pairs intact, split longer documents and articles at heading or paragraph boundaries, keep short product descriptions together, and use bounded overlap only when a section is too long. Compare it with the current 100-word/15-word-overlap baseline on the same saved questions, including source hits, answer support, indexing cost and latency; adopt and reindex sources only if the evidence warrants it.
+- [ ] For descriptive company questions, replace the all-question-terms-in-one-sentence prerequisite with a measured relevance check over a small evidence set; a relevant authorized passage may reach the model even when no individual sentence repeats every query term. Give the selected local model the shared system instructions, user question and numbered excerpts **after** application-enforced source authorization. Let it compose a clear answer with citations instead of returning an isolated source sentence by default. Treat excerpts as untrusted; verify cited source identity and support for company claims, and abstain or use a safe extractive fallback when evidence or output is inadequate. Preserve deterministic handling of explicit changing facts from PostgreSQL.
+- [ ] Rerun the same full-site, chat and seed suites after each accepted change; check answer usefulness, citation support, role/source revocation, prompt injection, unsupported changing facts and latency, including the cost of another 4B model call.
 
-Exit: the retained saved evaluations pass under explicitly reviewed criteria, with no regression in the chat and seed gates. Document any unresolved limitation and keep E5 and the Phase 5 backlog open; do not label those regressions fixed without a passing rerun.
+Exit: the retained saved evaluations pass under explicitly reviewed criteria, with no regression in the chat and seed gates; supported company questions receive useful cited answers, while missing evidence still produces a safe abstention. Document any unresolved limitation and keep E5 and the Phase 5 backlog open; do not label those regressions fixed without a passing rerun.
 
-## E6 — Evaluate model-assisted tool discovery
+## E6 — Evaluate hybrid routing and model-assisted investigation
 
-Goal: handle realistic product questions that do not match today's simple routing terms while keeping tool execution safe.
+Goal: handle realistic company and product questions that do not match today's simple routing terms by comparing application-first routing with bounded model-requested retrieval and read tools, while keeping tool execution safe. This routing hybrid is distinct from Qdrant's semantic-plus-keyword hybrid search.
 
-- [ ] Add representative missed-phrasing, mixed RAG/tool, irrelevant, ambiguous and adversarial cases with baseline route and tool-choice outcomes.
-- [ ] Compare the current inspectable application router against a model-assisted choice using only a small authorized evidence set and an explicit read-only tool allowlist. Do not send the full corpus or arbitrary function names to the model.
-- [ ] Keep Pydantic validation, role checks, source rechecks, bounded call count/time/results and PostgreSQL reads in application code. Missing or invalid model tool requests must fail safely; the model cannot authorize access or override current product records.
-- [ ] Measure tool-choice precision/recall, exact-fact correctness, unsupported claims, abstentions and latency on the same cases; adopt only if it improves the measured result without security regression.
+- [ ] Add representative missed-phrasing, mixed RAG/product-tool, irrelevant, ambiguous and adversarial cases with baseline route, retrieval, tool-choice and answer outcomes.
+- [ ] Keep application-enforced authentication, scope exclusions and an initial authorized RAG search for clear or uncertain Sardars questions; do not depend on the model remembering to search. Keep an application-triggered PostgreSQL lookup for explicit SKU, price or stock requests if the model omits it. Clear general product education need not search the company corpus.
+- [ ] Compare the current inspectable application router against a guarded model-assisted variant that can request another bounded `search_company_sources` search and approved read-only product tools when the initial evidence is insufficient or the question needs exact facts. Offer only explicit tool definitions; let the application validate and execute calls, recheck PostgreSQL source visibility, and return a small authorized evidence set. Do not send the full corpus or arbitrary function names to the model.
+- [ ] Keep Pydantic validation, role checks, source rechecks, bounded call count/time/results, safe failures and PostgreSQL reads in application code. Preserve source IDs/citations and verify exact product claims against tool results; retrieved or tool text cannot grant permission or override current product records. Compare Ollama tool-call behavior and latency on the selected 4B model.
+- [ ] Measure initial/follow-up retrieval usefulness, tool-choice precision/recall, exact-fact correctness, unsupported claims, abstentions and latency on the same cases; adopt model-assisted steps only if they improve the measured result without security regression.
 
-Exit: a tested routing decision, whether that is an improved deterministic router, a guarded model-assisted router, or the existing approach.
+Exit: a tested hybrid-routing decision, whether that retains the initial application search with guarded model-requested follow-ups, improves the deterministic router alone, or keeps the existing behavior. Company evidence remains cited and role-visible; exact changing facts come from PostgreSQL, with safe behavior when the model misses or requests an invalid tool.
 
 ## E7 — Bounded internet search, if needed
 
@@ -100,11 +107,15 @@ Exit: either a tested bounded search path with clear source labels or a document
 
 Goal: test the actual integrated flow beyond mocked browser and isolated backend checks.
 
-- [ ] With a disposable account and controlled files/sitemap, test approval, login, upload, job progress, retrieval, citations, source revocation, failed-job recovery, browser refresh and cleanup across PostgreSQL, originals and Qdrant.
+- [ ] With an existing admin account and controlled files/sitemap, test login, upload, job progress, retrieval, citations, source revocation, failed-job recovery, browser refresh and cleanup across PostgreSQL, originals and Qdrant.
 - [ ] Compare real staff questions with the Phase 11/12 baselines; include independent human groundedness review and additional languages only after their required scope is decided.
 - [ ] Record remaining data, quality, latency, accessibility and operational gaps without claiming production readiness.
 
 Exit: a repeatable live internal acceptance record with known gaps and verified cleanup.
+
+## Deferred — Internal registration and approval
+
+After the admin ingestion flow is working and when additional internal accounts are needed, add a rate-limited registration request that creates an inactive/pending account. An existing admin must approve it and assign staff access before login or ingestion; applicants cannot assign their own role. Add the corresponding admin review and applicant-status UI, then test pending/denied access and approval end to end. Public customer registration remains outside the internal release. This work is not an E4 or E8 exit criterion.
 
 ## E9 — Production readiness, only when deployment is chosen
 

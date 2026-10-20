@@ -1,5 +1,7 @@
 # Source inventory for the internal retrieval prototype
 
+E4 isolated-stack note, 2026-10-19: The historical Phase 5 website counts below describe the **original retained corpus**, not the isolated `sardars-e1` stack. In the isolated stack the admin upload/sitemap UI is ready, one active admin and 4,983 PostgreSQL products exist, but source registrations, ingestion jobs and Qdrant points are all **zero**. The owner-supplied `data/sources/company_profile.md` and `https://sardarandco.com/sitemap.xml` remain authorized candidate inputs; the developer intends to enter Sardars data through the new browser flow. Record each newly supplied file's format, visibility, version and changing claims before importing it. Do not copy the original corpus or treat its old answer scores as the new E4 baseline. See `docs/e4_admin_ingestion_checkpoint.md`.
+
 Policy decision, 2026-10-13: the project owner authorized the supplied sources below for the admin/staff-only prototype. Future files, documents, and URLs supplied or registered by authorized admins/staff are eligible for internal retrieval at the source level; individual pages do not require manual approval. Record who supplied a source, its allowed roles, and its version. Source approval is not verification of changing business facts.
 
 | Source | Visibility | Approval/provenance | Status |

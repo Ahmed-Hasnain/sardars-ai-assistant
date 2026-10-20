@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth.dependencies import get_current_user
 from app.llm.base import ChatResult, ModelError
+from app.llm.prompts import BASE_SYSTEM_PROMPT
 from app.rag.answer_seed import CitedAnswer, CitedSource, FALLBACK
 from app.main import app
 from app.schemas.chat import ChatResponse
@@ -32,6 +33,12 @@ def test_chat_returns_unverified_answer() -> None:
     assert response.json()["route"] == "general"
     assert response.json()["company_data_verified"] is False
     assert mock_chat.await_args.args[0][-1]["content"] == "Hello"
+    system = mock_chat.await_args.args[0][0]
+    assert system["role"] == "system"
+    assert system["content"].startswith(BASE_SYSTEM_PROMPT)
+    assert "No Sardars sources or product records are supplied on this route" in system["content"]
+    assert "Showrooms 4, 5 and 6" not in system["content"]
+    assert "live website" in system["content"]
 
 
 def test_conversational_mixer_definition_uses_bathroom_meaning() -> None:

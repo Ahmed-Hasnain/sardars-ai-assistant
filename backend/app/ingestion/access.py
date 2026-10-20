@@ -10,6 +10,8 @@ def actor(db: Session, job: IngestionJob) -> User:
     user = db.get(User, job.submitted_by_user_id) if job.submitted_by_user_id else None
     if user is None or not user.is_active or user.role not in ALLOWED_VISIBILITIES:
         raise ValueError("Ingestion submitter is no longer authorized")
+    if job.parent_job_id is not None and user.role != "admin":
+        raise ValueError("Sitemap page submitter is no longer an admin")
     return user
 
 

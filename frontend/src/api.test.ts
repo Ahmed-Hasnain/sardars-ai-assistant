@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { ApiError, isFileSourceUrl, streamMessage } from './api'
+import { ApiError, isFileSourceUrl, streamMessage, submitIngestionFile, submitSitemap } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -46,4 +46,24 @@ it('accepts only the authenticated local file route for file sources', () => {
   expect(isFileSourceUrl('/api/v1/ingestion/files/11111111-1111-1111-1111-111111111111')).toBe(true)
   expect(isFileSourceUrl('https://evil.example/api/v1/ingestion/files/11111111-1111-1111-1111-111111111111')).toBe(false)
   expect(isFileSourceUrl('/api/v1/ingestion/files/../../secrets')).toBe(false)
+})
+
+it('submits a sitemap with the admin token and bounded page count', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job_id: 'job-1', status: 'pending' }), { status: 202 }))
+  vi.stubGlobal('fetch', fetchMock)
+  await submitSitemap('admin-token', 'https://sardarandco.com/sitemap.xml', 'staff', 1500)
+  const [path, options] = fetchMock.mock.calls[0]
+  expect(path).toBe('/api/v1/ingestion/sitemaps')
+  expect(options.headers.Authorization).toBe('Bearer admin-token')
+  expect(JSON.parse(options.body)).toEqual({ url: 'https://sardarandco.com/sitemap.xml', visibility: 'staff', max_pages: 1500 })
+})
+
+it('uploads multipart file without overriding the browser boundary', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job_id: 'job-2', status: 'pending' }), { status: 202 }))
+  vi.stubGlobal('fetch', fetchMock)
+  await submitIngestionFile('admin-token', new File(['descriptive facts'], 'profile.txt'), 'admin', 'Profile')
+  const [, options] = fetchMock.mock.calls[0]
+  expect(options.headers['Content-Type']).toBeUndefined()
+  expect(options.body.get('file').name).toBe('profile.txt')
+  expect(options.body.get('visibility')).toBe('admin')
 })

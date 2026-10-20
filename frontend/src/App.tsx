@@ -3,6 +3,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { downloadSource, isFileSourceUrl } from './api'
 import { useChatStore, type Message } from './store'
+import KnowledgePanel from './KnowledgePanel'
 
 function safeSourceUrl(url: string): string | null {
   try {
@@ -119,6 +120,7 @@ const suggestions = [
 
 function Chat() {
   const user = useChatStore((state) => state.user)
+  const token = useChatStore((state) => state.token)
   const messages = useChatStore((state) => state.messages)
   const status = useChatStore((state) => state.status)
   const error = useChatStore((state) => state.error)
@@ -139,6 +141,7 @@ function Chat() {
   const signOut = useChatStore((state) => state.signOut)
   const [draft, setDraft] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [workspace, setWorkspace] = useState<'assistant' | 'knowledge'>('assistant')
 
   async function send(value: string) {
     const message = value.trim()
@@ -157,9 +160,10 @@ function Chat() {
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand"><span className="brand-mark">S</span><span>Sardars <strong>AI</strong></span></div>
-          <button className="new-chat-button" aria-label="New conversation" onClick={() => { newChat(); setDraft('') }} disabled={status === 'sending'}>＋ <span>New conversation</span></button>
+          <button className="new-chat-button" aria-label="New conversation" onClick={() => { newChat(); setDraft(''); setWorkspace('assistant') }} disabled={status === 'sending'}>＋ <span>New conversation</span></button>
           <div className="sidebar-label">WORKSPACE</div>
-          <div className="sidebar-item active"><span aria-hidden="true">◇</span> Assistant</div>
+          <button type="button" className={`sidebar-item ${workspace === 'assistant' ? 'active' : ''}`} onClick={() => setWorkspace('assistant')}><span aria-hidden="true">◇</span> Assistant</button>
+          {user?.role === 'admin' && <button type="button" className={`sidebar-item ${workspace === 'knowledge' ? 'active' : ''}`} onClick={() => setWorkspace('knowledge')}><span aria-hidden="true">▣</span> Knowledge sources</button>}
           <section className={`history-section ${historyOpen ? 'open' : ''}`} aria-label="Recent conversations">
             <button className="history-toggle" type="button" onClick={() => setHistoryOpen((open) => !open)} aria-expanded={historyOpen}>Chats ▾</button>
             <div className="history-heading">RECENT CONVERSATIONS</div>
@@ -192,10 +196,10 @@ function Chat() {
 
       <main className="chat-main">
         <header className="topbar">
-          <div><span className="topbar-title">Assistant</span><span className="topbar-subtitle">Internal knowledge &amp; product help</span></div>
+          <div><span className="topbar-title">{workspace === 'knowledge' ? 'Knowledge sources' : 'Assistant'}</span><span className="topbar-subtitle">Internal knowledge &amp; product help</span></div>
           <div className="topbar-status"><span className="status-dot" /> {conversationId ? 'Conversation active' : 'Ready to help'}</div>
         </header>
-        <div className="sr-only" role="status" aria-live="polite">
+        {workspace === 'knowledge' && user?.role === 'admin' && token ? <KnowledgePanel token={token} /> : <><div className="sr-only" role="status" aria-live="polite">
           {status === 'sending' ? 'Preparing answer' : messages.at(-1)?.role === 'assistant' ? 'Answer ready' : ''}
         </div>
 
@@ -233,6 +237,7 @@ function Chat() {
           </form>
           <p className="composer-note">Company details are shown only when verified against authorized sources. Double-check important decisions.</p>
         </div>
+        </>}
       </main>
     </div>
   )

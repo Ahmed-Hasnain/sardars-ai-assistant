@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import IngestionJob, SourceRegistration
@@ -41,7 +41,8 @@ class JobRun:
     request: JobRequest
 
 
-def enqueue(sessions: sessionmaker[Session], request: JobRequest, *, submitted_by_user_id: int | None = None, job_id: str | None = None) -> str:
+def enqueue(sessions: sessionmaker[Session], request: JobRequest, *, submitted_by_user_id: int | None = None,
+            job_id: str | None = None, parent_job_id: str | None = None) -> str:
     if request.scope == "internal" and submitted_by_user_id is None:
         raise ValueError("Internal ingestion requires an authenticated submitter")
     job_id = str(UUID(job_id)) if job_id else str(uuid4())
@@ -52,10 +53,11 @@ def enqueue(sessions: sessionmaker[Session], request: JobRequest, *, submitted_b
         existing = db.get(IngestionJob, job_id)
         if existing is not None:
             if (existing.request != snapshot or existing.operation != request.operation
-                or existing.submitted_by_user_id != submitted_by_user_id):
+                or existing.submitted_by_user_id != submitted_by_user_id or existing.parent_job_id != parent_job_id):
                 raise ValueError("Job identity conflicts with its saved snapshot")
             return job_id
-        db.add(IngestionJob(id=job_id, operation=request.operation, request=snapshot, status="pending", attempts=0, created_at=now(), submitted_by_user_id=submitted_by_user_id))
+        db.add(IngestionJob(id=job_id, operation=request.operation, request=snapshot, status="pending", attempts=0,
+                            created_at=now(), submitted_by_user_id=submitted_by_user_id, parent_job_id=parent_job_id))
     return job_id
 
 
@@ -98,7 +100,9 @@ def claim(sessions: sessionmaker[Session], job_id: str, budget: float, *, retry:
                 job.started_at, job.finished_at = now(), None
                 # Allows bounded socket teardown after the index processing budget.
                 job.lease_expires_at = now() + timedelta(seconds=2 * budget + 60)
-                job.error_code, job.error_message, job.result = None, None, None
+                job.error_code, job.error_message = None, None
+                if request.operation != "crawl":
+                    job.result = None
                 run = JobRun(job.id, token, job.attempts, request)
     if exhausted:
         raise ValueError("Retry limit reached")
@@ -115,6 +119,15 @@ def require_run(db: Session, run: JobRun) -> IngestionJob:
     return job
 
 
+def extend_lease(sessions: sessionmaker[Session], run: JobRun, budget: float) -> None:
+    """Give a validated large upload enough time without changing its run token."""
+    with transaction(sessions) as db:
+        job = require_run(db, run)
+        expiry = now() + timedelta(seconds=2 * budget + 60)
+        if utc(job.lease_expires_at) < expiry:
+            job.lease_expires_at = expiry
+
+
 def fail(sessions: sessionmaker[Session], run: JobRun, code: str, message: str) -> None:
     with transaction(sessions) as db:
         job = db.scalar(select(IngestionJob).where(IngestionJob.id == run.id).with_for_update())
@@ -127,14 +140,40 @@ def fail(sessions: sessionmaker[Session], run: JobRun, code: str, message: str) 
                 source.index_status = "failed"
 
 
+def requeue(sessions: sessionmaker[Session], job_id: str) -> None:
+    """Explicitly retry a failed job without changing its saved input."""
+    with transaction(sessions) as db:
+        job = db.scalar(select(IngestionJob).where(IngestionJob.id == job_id).with_for_update())
+        if job is None or job.attempts >= MAX_ATTEMPTS:
+            raise ValueError("Job not found or retry limit reached")
+        expired = job.status == "processing" and job.lease_expires_at and utc(job.lease_expires_at) <= now()
+        if job.status != "failed" and not expired:
+            raise ValueError("Only failed or expired jobs can be retried")
+        job.status, job.run_token, job.lease_expires_at = "pending", None, None
+        job.error_code, job.error_message, job.finished_at = None, None, None
+
+
+def next_job(sessions: sessionmaker[Session]) -> tuple[str, bool] | None:
+    """Read the oldest runnable ID; claim() remains the concurrency fence."""
+    with sessions() as db:
+        job = db.scalar(select(IngestionJob).where(or_(
+            IngestionJob.status == "pending",
+            (IngestionJob.status == "processing") & (IngestionJob.lease_expires_at <= now()),
+        )).order_by(IngestionJob.created_at, IngestionJob.id).limit(1))
+        return (job.id, job.status == "processing") if job else None
+
+
 def job_view(job: IngestionJob) -> dict:
     """Never return snapshots/document text, credentials, or worker tokens."""
+    result = job.result
+    if job.operation == "crawl" and isinstance(result, dict):
+        result = {key: value for key, value in result.items() if key != "urls"}
     return {
-        "job_id": job.id, "operation": job.operation, "status": job.status,
+        "job_id": job.id, "operation": job.operation, "status": job.status, "parent_job_id": job.parent_job_id,
         "attempts": job.attempts, "max_attempts": MAX_ATTEMPTS,
         "created_at": utc(job.created_at).isoformat(),
         "started_at": utc(job.started_at).isoformat() if job.started_at else None,
         "finished_at": utc(job.finished_at).isoformat() if job.finished_at else None,
         "lease_expired": bool(job.status == "processing" and job.lease_expires_at and utc(job.lease_expires_at) <= now()),
-        "error_code": job.error_code, "error": job.error_message, "result": job.result,
+        "error_code": job.error_code, "error": job.error_message, "result": result,
     }

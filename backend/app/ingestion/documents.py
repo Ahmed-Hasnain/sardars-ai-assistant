@@ -1,13 +1,16 @@
 """Identity and integrity rules for authenticated, locally retained sources."""
 
 from hashlib import sha256
+import re
 from typing import Literal, Self
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from app.ingestion.site_documents import MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS
+from app.ingestion.site_documents import (
+    MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS, MAX_TEXT_UPLOAD_CHARS, MAX_TEXT_UPLOAD_WORDS,
+)
 from app.ingestion.public_site import source_type
 
 FILE_PREFIX = "/api/v1/ingestion/files/"
@@ -21,6 +24,22 @@ def valid_web_url(url: str) -> bool:
                 and parsed.netloc == parsed.hostname and not parsed.query and not parsed.fragment
                 and not any(ord(c) <= 32 or ord(c) >= 127 or c == "\\" for c in url))
     except ValueError:
+        return False
+
+
+def valid_sitemap_url(url: str) -> bool:
+    """Allow only direct XML URLs and bounded Shopify numeric range queries."""
+    try:
+        parsed = urlsplit(url)
+        base = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+        if (len(url) > 2048 or parsed.fragment or not parsed.path.lower().endswith(".xml")
+            or not valid_web_url(base)):
+            return False
+        if not parsed.query:
+            return True
+        match = re.fullmatch(r"from=([0-9]{1,20})&to=([0-9]{1,20})", parsed.query)
+        return match is not None and int(match[1]) <= int(match[2])
+    except (TypeError, ValueError):
         return False
 
 
@@ -52,7 +71,7 @@ class SuppliedDocument(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     fetched_at: AwareDatetime
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    text: str = Field(min_length=1, max_length=MAX_DOCUMENT_CHARS)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_UPLOAD_CHARS)
     storage_key: UUID
     original_filename: str = Field(min_length=1, max_length=200)
     media_type: Literal["application/pdf", "text/plain", "text/markdown", "text/html"]
@@ -60,9 +79,12 @@ class SuppliedDocument(BaseModel):
 
     @model_validator(mode="after")
     def integrity(self) -> Self:
+        max_chars, max_words = ((MAX_TEXT_UPLOAD_CHARS, MAX_TEXT_UPLOAD_WORDS)
+                                if self.source_type in {"text", "markdown"}
+                                else (MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS))
         if (not valid_source(self.url, self.source_type) or sha256(self.url.encode()).hexdigest() != self.source_id
             or sha256(self.text.encode()).hexdigest() != self.content_sha256 or not self.text.strip()
-            or not self.title.strip() or len(self.text.split()) > MAX_DOCUMENT_WORDS
+            or not self.title.strip() or len(self.text) > max_chars or len(self.text.split()) > max_words
             or any(ord(c) < 32 for c in self.title + self.original_filename)
             or "/" in self.original_filename or "\\" in self.original_filename):
             raise ValueError("Invalid supplied document identity or integrity")

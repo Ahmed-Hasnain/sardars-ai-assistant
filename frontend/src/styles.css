@@ -17,8 +17,9 @@ a{color:inherit}
 .new-chat-button{width:100%;display:flex;align-items:center;gap:12px;margin-top:44px;padding:11px 14px;border:1px solid #719381;border-radius:10px;background:#285846;color:white;text-align:left;font-size:14px;font-weight:600}
 .new-chat-button:hover{background:#346b54}
 .sidebar-label{margin:38px 13px 12px;color:#9fb9a7;font-size:10px;letter-spacing:.16em;font-weight:700}
-.sidebar-item{display:flex;align-items:center;gap:12px;padding:11px 15px;border-radius:9px;color:#d9e8dc;font-size:14px}
+.sidebar-item{display:flex;align-items:center;gap:12px;width:100%;padding:11px 15px;border:0;border-radius:9px;background:transparent;color:#d9e8dc;font-size:14px;text-align:left}
 .sidebar-item.active{background:#315b49;color:white}
+.sidebar-item:hover{background:#285340}
 .history-section{min-height:0;flex:1;display:flex;flex-direction:column;margin-top:26px}
 .history-heading{margin:0 13px 9px;color:#9fb9a7;font-size:10px;letter-spacing:.16em;font-weight:700}
 .history-toggle{display:none}
@@ -122,7 +123,37 @@ a{color:inherit}
 .primary-button:hover{background:#36734f}
 .login-footnote{margin-top:24px;color:#94a096;font-size:11px}
 
+.knowledge-panel{flex:1;overflow-y:auto;padding:32px 40px 60px}
+.knowledge-heading{max-width:780px;margin-bottom:22px}
+.knowledge-heading h1{margin:7px 0;font-size:28px;letter-spacing:-.04em}
+.knowledge-heading p,.knowledge-card p,.knowledge-list p{color:#687b6c;font-size:13px;line-height:1.5}
+.knowledge-notice{padding:10px 13px;border:1px solid #b9d8c2;border-radius:8px;background:#eff8f0;color:#23593b;font-size:12px}
+.knowledge-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:22px 0 30px}
+.knowledge-card,.knowledge-list{min-width:0;padding:20px;border:1px solid #dde7dd;border-radius:14px;background:#fff}
+.knowledge-card{display:flex;flex-direction:column;gap:9px}
+.knowledge-card h2,.knowledge-list h2{margin:0;font-size:16px}
+.knowledge-card p{min-height:60px;margin:0 0 6px}
+.knowledge-card label{font-size:12px;font-weight:700}
+.knowledge-card input,.knowledge-card select{min-width:0;min-height:38px;padding:7px 9px;border:1px solid #cddccf;border-radius:8px;background:white;color:#26332c}
+.knowledge-card button,.knowledge-job-detail button,.knowledge-source button,.knowledge-section-heading button,.knowledge-pages button,.knowledge-list>button{padding:8px 11px;border:1px solid #80a58b;border-radius:8px;background:#f1f8f1;color:#245b40;font-size:12px}
+.knowledge-card button{margin-top:auto;background:#245b40;color:white}
+.knowledge-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.knowledge-section-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.knowledge-job{display:grid;grid-template-columns:1fr auto;gap:4px;width:100%;padding:11px;border:0;border-bottom:1px solid #e6eee6;background:white;color:#26332c;text-align:left}
+.knowledge-job:hover,.knowledge-job.selected{background:#eef6ef}
+.knowledge-job strong,.knowledge-source strong{font-size:12px}
+.knowledge-job span,.knowledge-source small{font-size:11px;color:#5c7864}
+.knowledge-job small{grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;color:#84958a;font-size:10px}
+.knowledge-job-detail{margin-top:18px;padding:12px;border-radius:9px;background:#f6faf6}
+.knowledge-job-detail h3,.knowledge-pages h4{margin:0 0 8px;font-size:13px}
+.knowledge-page,.knowledge-source{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-top:1px solid #e3ebe3;font-size:11px}
+.knowledge-page{flex-wrap:wrap}
+.knowledge-page span{min-width:0;flex:1;overflow-wrap:anywhere}
+.knowledge-page small{width:100%;color:#a13e34}
+.knowledge-source div{min-width:0;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+
 @media(max-width:800px){.sidebar{width:190px}
+.knowledge-cards{grid-template-columns:1fr}.knowledge-grid{grid-template-columns:1fr}.knowledge-card p{min-height:0}
 .topbar{padding:0 25px}
 .suggestions{grid-template-columns:1fr}
 .suggestions button{min-height:0}
@@ -132,10 +163,13 @@ a{color:inherit}
 @media(max-width:600px){.app-shell{display:block}
 .sidebar{position:relative;width:100%;height:53px;padding:10px 14px;display:flex;flex-direction:row;align-items:center}
 .sidebar-top{flex:none;display:flex;flex-direction:row;align-items:center;gap:7px}
+.knowledge-panel{padding:18px 14px 40px}
 .brand{padding:0;font-size:14px}
 .brand-mark{width:29px;height:29px;font-size:20px}
 .new-chat-button{width:auto;margin:0;padding:7px 11px;font-size:17px}
-.new-chat-button span,.sidebar-label,.sidebar-item,.account{display:none}
+.new-chat-button span,.sidebar-label,.account{display:none}
+.sidebar-item{width:auto;padding:7px;font-size:11px}
+.sidebar-item span{display:none}
 .history-section{flex:none;margin:0;min-height:0;display:block}
 .history-toggle{display:block;padding:7px 5px;border:0;background:transparent;color:#e9f5e9;font-size:11px}
 .history-heading{display:none}

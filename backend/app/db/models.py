@@ -76,7 +76,7 @@ class ConversationMessage(Base):
 class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
     __table_args__ = (
-        CheckConstraint("operation IN ('import', 'remove')", name="ck_ingestion_jobs_operation"),
+        CheckConstraint("operation IN ('import', 'remove', 'crawl')", name="ck_ingestion_jobs_operation"),
         CheckConstraint("status IN ('pending', 'processing', 'completed', 'failed')", name="ck_ingestion_jobs_status"),
         CheckConstraint("attempts >= 0 AND attempts <= 3", name="ck_ingestion_jobs_attempts"),
     )
@@ -87,6 +87,7 @@ class IngestionJob(Base):
     request: Mapped[dict] = mapped_column(JSON, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     submitted_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", name="fk_ingestion_jobs_submitter", ondelete="SET NULL"))
+    parent_job_id: Mapped[str | None] = mapped_column(String(36), index=True)
     run_token: Mapped[str | None] = mapped_column(String(36))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

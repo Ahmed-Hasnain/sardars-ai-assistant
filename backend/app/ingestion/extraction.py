@@ -10,6 +10,7 @@ import sys
 from uuid import UUID, uuid4
 
 from app.core.config import Settings
+from app.ingestion.documents import valid_web_url
 from app.ingestion.extract_worker import MAX_FILE_BYTES
 
 FORMATS = {".txt": ("text", "text/plain"), ".md": ("markdown", "text/markdown"), ".pdf": ("pdf", "application/pdf")}
@@ -59,6 +60,15 @@ def extract_file(raw: bytes, kind: str) -> str:
 def extract_url(url: str, settings: Settings) -> tuple[bytes, str, str]:
     result = run_extraction({"mode": "url", "url": url, "hosts": settings.ingestion_url_hosts})
     return base64.b64decode(result["raw"], validate=True), result["title"], result["text"]
+
+
+def discover_sitemap(url: str, settings: Settings, max_pages: int) -> dict:
+    result = run_extraction({"mode": "sitemap", "url": url, "hosts": settings.ingestion_url_hosts,
+                             "max_pages": max_pages})
+    if (not isinstance(result.get("urls"), list) or len(result["urls"]) > max_pages
+        or not all(isinstance(item, str) and valid_web_url(item) for item in result["urls"])):
+        raise ExtractionError("Sitemap discovery returned invalid URLs")
+    return result
 
 
 def storage_path(settings: Settings, key: str) -> Path:

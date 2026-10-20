@@ -72,6 +72,9 @@ class WebsiteIndexer:
         self.client = client
         self.deadline = time.monotonic() + settings.import_timeout_seconds
 
+    def extend_deadline(self, seconds: float) -> None:
+        self.deadline = max(self.deadline, time.monotonic() + seconds)
+
     def _timeout(self) -> float:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
