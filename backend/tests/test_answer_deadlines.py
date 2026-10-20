@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 import pytest
+from pydantic import ValidationError
 
 from app.api.answer_deadlines import remaining_timeout, within_answer_deadline
 from app.auth.dependencies import get_current_user
+from app.core.config import Settings
 from app.main import app
 
 
@@ -50,3 +52,9 @@ def test_deadline_budget_reaches_threaded_retrieval(monkeypatch):
     allowed = asyncio.run(within_answer_deadline(work()))
     assert 0 < allowed <= 1.0
     assert remaining_timeout(120.0) == 120.0  # context is cleared afterward
+
+
+def test_answer_budget_accepts_five_minutes_but_keeps_a_finite_cap():
+    assert Settings(answer_timeout_seconds=300).answer_timeout_seconds == 300
+    with pytest.raises(ValidationError):
+        Settings(answer_timeout_seconds=301)

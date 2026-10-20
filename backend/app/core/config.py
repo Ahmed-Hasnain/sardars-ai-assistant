@@ -23,10 +23,10 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:0.6b"
-    ollama_timeout_seconds: float = 120.0
+    ollama_timeout_seconds: float = 330.0
     ollama_keep_alive: int = 0
     ollama_chat_keep_alive: int = Field(default=300, ge=0, le=600)
-    answer_timeout_seconds: float = Field(default=90.0, ge=5, le=180)
+    answer_timeout_seconds: float = Field(default=300.0, ge=5, le=300)
     conversation_retention_days: int = Field(default=30, ge=1, le=365)
 
     qdrant_base_url: str = "http://127.0.0.1:6333"
