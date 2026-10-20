@@ -3,6 +3,7 @@ from hashlib import sha256
 from unittest.mock import AsyncMock
 
 from app.llm.base import ChatResult
+from app.llm.prompts import BASE_SYSTEM_PROMPT
 from app.rag.answer_seed import CitedSource, FALLBACK, answer_from_points
 
 
@@ -95,6 +96,9 @@ def test_answer_cites_the_used_source() -> None:
     assert result.sources == [CitedSource(1, sha256(ABOUT_URL.encode()).hexdigest(), "About Us", ABOUT_URL, FETCHED_AT)]
     assert "[1]" in result.text
     assert "Source excerpts:" in model.chat.await_args.args[0][1]["content"]
+    system = model.chat.await_args.args[0][0]
+    assert system["role"] == "system" and system["content"].startswith(BASE_SYSTEM_PROMPT)
+    assert "Put a source marker" in system["content"]
 
 
 def test_company_business_paraphrase_lets_model_choose_authorized_evidence() -> None:
@@ -115,6 +119,9 @@ def test_company_business_paraphrase_lets_model_choose_authorized_evidence() -> 
     assert result.model == "test-model"
     assert "category of business" in model.chat.await_args.args[0][1]["content"]
     assert "luxury sanitary products" in model.chat.await_args.args[0][1]["content"]
+    system = model.chat.await_args.args[0][0]
+    assert system["role"] == "system" and system["content"].startswith(BASE_SYSTEM_PROMPT)
+    assert "Reply with only its number" in system["content"]
 
 
 def test_model_judge_may_abstain_or_return_an_invalid_selection() -> None:

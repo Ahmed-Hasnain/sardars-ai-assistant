@@ -17,7 +17,7 @@ from xml.etree import ElementTree
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
-from app.ingestion.documents import valid_web_url
+from app.ingestion.documents import valid_sitemap_url, valid_web_url
 from app.ingestion.public_site import extract_document, source_type, USER_AGENT
 from app.ingestion.site_documents import MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS
 
@@ -154,7 +154,7 @@ def web_text(url: str, hosts: list[str]) -> dict:
 
 def sitemap_urls(url: str, hosts: list[str], max_pages: int) -> dict:
     """Discover same-host descriptive pages; page extraction remains a child job."""
-    if (not valid_web_url(url) or not urlsplit(url).path.lower().endswith(".xml")
+    if (not valid_sitemap_url(url)
         or urlsplit(url).hostname not in hosts or not 1 <= max_pages <= MAX_SITEMAP_PAGES):
         raise ExtractionFailure("Sitemap URL or page limit is not permitted")
     host = urlsplit(url).hostname
@@ -172,12 +172,14 @@ def sitemap_urls(url: str, hosts: list[str], max_pages: int) -> dict:
             continue
         if len(seen_files) >= MAX_SITEMAP_FILES or depth > 2:
             raise ExtractionFailure("Sitemap has too many XML files or nesting levels")
-        if not valid_web_url(current) or urlsplit(current).hostname != host or not urlsplit(current).path.lower().endswith(".xml"):
+        if not valid_sitemap_url(current) or urlsplit(current).hostname != host:
             raise ExtractionFailure("Sitemap references an invalid or off-host XML file")
         if not rules.can_fetch(USER_AGENT, current):
             raise ExtractionFailure("Sitemap is disallowed by robots rules")
         seen_files.add(current)
-        raw = fetch(host, address, urlsplit(current).path or "/", MAX_SITEMAP_XML_BYTES, xml=True)
+        parsed = urlsplit(current)
+        path = parsed.path + ("?" + parsed.query if parsed.query else "")
+        raw = fetch(host, address, path, MAX_SITEMAP_XML_BYTES, xml=True)
         total_bytes += len(raw)
         if total_bytes > MAX_SITEMAP_TOTAL_BYTES or b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
             raise ExtractionFailure("Sitemap XML exceeds its limit or contains forbidden entities")

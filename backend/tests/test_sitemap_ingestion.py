@@ -5,8 +5,10 @@ import pytest
 from sqlalchemy import select
 
 from app.db.models import IngestionJob, SourceRegistration, User
+from app.ingestion.documents import valid_sitemap_url, valid_web_url
 from app.ingestion.extract_worker import ExtractionFailure, sitemap_urls
 from app.ingestion.worker import process_one
+from app.schemas.ingestion import SitemapSubmission
 from test_ingestion_api import runtime
 
 
@@ -33,6 +35,69 @@ def test_sitemap_rejects_entities_and_off_host_xml(monkeypatch):
     monkeypatch.setattr('app.ingestion.extract_worker.fetch', lambda *_args, **_kwargs: b'User-agent: *\nAllow: /' if _args[2] == '/robots.txt' else b'<!DOCTYPE foo><urlset/>')
     with pytest.raises(ExtractionFailure, match='forbidden entities'):
         sitemap_urls('https://sardarandco.com/sitemap.xml', ['sardarandco.com'], 10)
+
+
+def test_sitemap_follows_same_host_numeric_range_and_keeps_query_on_fetch(monkeypatch):
+    child = 'https://sardarandco.com/sitemap_pages_1.xml?from=89310855233&to=116980482113'
+    index = ('<?xml version="1.0"?><sitemapindex><sitemap><loc>' + child.replace('&', '&amp;')
+             + '</loc></sitemap></sitemapindex>').encode()
+    requested = []
+    monkeypatch.setattr('app.ingestion.extract_worker.public_addresses', lambda _host: ['93.184.215.14'])
+
+    def fetch(_host, _address, path, _limit, **_options):
+        requested.append(path)
+        return {'/robots.txt': b'User-agent: *\nAllow: /', '/sitemap.xml': index,
+                '/sitemap_pages_1.xml?from=89310855233&to=116980482113': PAGES}[path]
+
+    monkeypatch.setattr('app.ingestion.extract_worker.fetch', fetch)
+    result = sitemap_urls('https://sardarandco.com/sitemap.xml', ['sardarandco.com'], 2)
+    assert result['xml_files'] == 2 and len(result['urls']) == 2
+    assert '/sitemap_pages_1.xml?from=89310855233&to=116980482113' in requested
+    assert SitemapSubmission(url=child).url == child
+    assert not valid_web_url(child)  # Page URLs keep their stricter no-query rule.
+
+
+@pytest.mark.parametrize('child', [
+    'https://other.test/sitemap_pages_1.xml?from=1&to=2',
+    'https://sardarandco.com/sitemap_pages_1.xml?next=https://other.test/',
+])
+def test_sitemap_rejects_unsafe_child_xml_before_fetch(monkeypatch, child):
+    index = ('<sitemapindex><sitemap><loc>' + child.replace('&', '&amp;')
+             + '</loc></sitemap></sitemapindex>').encode()
+    requested = []
+    monkeypatch.setattr('app.ingestion.extract_worker.public_addresses', lambda _host: ['93.184.215.14'])
+
+    def fetch(_host, _address, path, _limit, **_options):
+        requested.append(path)
+        return b'User-agent: *\nAllow: /' if path == '/robots.txt' else index
+
+    monkeypatch.setattr('app.ingestion.extract_worker.fetch', fetch)
+    with pytest.raises(ExtractionFailure, match='invalid or off-host XML'):
+        sitemap_urls('https://sardarandco.com/sitemap.xml', ['sardarandco.com'], 10)
+    assert requested == ['/robots.txt', '/sitemap.xml']
+
+
+@pytest.mark.parametrize('url', [
+    'https://other.test/sitemap_pages_1.xml?from=1&to=2',
+    'https://sardarandco.com:444/sitemap.xml?from=1&to=2',
+    'https://sardarandco.com/sitemap.xml?from=1&to=2&redirect=https://other.test/',
+    'https://sardarandco.com/sitemap.xml?from=1&from=2&to=3',
+    'https://sardarandco.com/sitemap.xml?from=2&to=1',
+    'https://sardarandco.com/sitemap.xml?from=%31&to=2',
+    'https://sardarandco.com/sitemap.xml?from=1&to=2#fragment',
+])
+def test_sitemap_query_rejects_unapproved_forms(url, monkeypatch):
+    # The allowed host is checked by the submission service and the crawler;
+    # the URL validator itself intentionally supports other configured hosts.
+    if 'other.test' not in url.split('?', 1)[0]:
+        assert not valid_sitemap_url(url)
+        with pytest.raises(ValueError):
+            SitemapSubmission(url=url)
+    else:
+        assert valid_sitemap_url(url)
+        monkeypatch.setattr('app.ingestion.extract_worker.public_addresses', lambda _host: ['93.184.215.14'])
+        with pytest.raises(ExtractionFailure, match='not permitted'):
+            sitemap_urls(url, ['sardarandco.com'], 10)
 
 
 def _run_once(sessions, settings, services):

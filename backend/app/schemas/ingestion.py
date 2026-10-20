@@ -3,7 +3,7 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.ingestion.documents import valid_web_url
+from app.ingestion.documents import valid_sitemap_url, valid_web_url
 
 
 class URLSubmission(BaseModel):
@@ -28,10 +28,8 @@ class SitemapSubmission(BaseModel):
     @field_validator("url")
     @classmethod
     def check_sitemap(cls, value: str) -> str:
-        from urllib.parse import urlsplit
-
-        if not valid_web_url(value) or not urlsplit(value).path.lower().endswith(".xml"):
-            raise ValueError("Use a direct HTTPS sitemap XML URL without credentials, query, or fragment")
+        if not valid_sitemap_url(value):
+            raise ValueError("Use a direct HTTPS sitemap XML URL; only numeric from/to range queries are supported")
         return value
 
 

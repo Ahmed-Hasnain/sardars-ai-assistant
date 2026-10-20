@@ -1,8 +1,9 @@
 """Identity and integrity rules for authenticated, locally retained sources."""
 
 from hashlib import sha256
+import re
 from typing import Literal, Self
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -21,6 +22,22 @@ def valid_web_url(url: str) -> bool:
                 and parsed.netloc == parsed.hostname and not parsed.query and not parsed.fragment
                 and not any(ord(c) <= 32 or ord(c) >= 127 or c == "\\" for c in url))
     except ValueError:
+        return False
+
+
+def valid_sitemap_url(url: str) -> bool:
+    """Allow only direct XML URLs and bounded Shopify numeric range queries."""
+    try:
+        parsed = urlsplit(url)
+        base = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+        if (len(url) > 2048 or parsed.fragment or not parsed.path.lower().endswith(".xml")
+            or not valid_web_url(base)):
+            return False
+        if not parsed.query:
+            return True
+        match = re.fullmatch(r"from=([0-9]{1,20})&to=([0-9]{1,20})", parsed.query)
+        return match is not None and int(match[1]) <= int(match[2])
+    except (TypeError, ValueError):
         return False
 
 
