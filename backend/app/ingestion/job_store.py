@@ -119,6 +119,15 @@ def require_run(db: Session, run: JobRun) -> IngestionJob:
     return job
 
 
+def extend_lease(sessions: sessionmaker[Session], run: JobRun, budget: float) -> None:
+    """Give a validated large upload enough time without changing its run token."""
+    with transaction(sessions) as db:
+        job = require_run(db, run)
+        expiry = now() + timedelta(seconds=2 * budget + 60)
+        if utc(job.lease_expires_at) < expiry:
+            job.lease_expires_at = expiry
+
+
 def fail(sessions: sessionmaker[Session], run: JobRun, code: str, message: str) -> None:
     with transaction(sessions) as db:
         job = db.scalar(select(IngestionJob).where(IngestionJob.id == run.id).with_for_update())

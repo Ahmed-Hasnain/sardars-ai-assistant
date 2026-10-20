@@ -8,7 +8,9 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from app.ingestion.site_documents import MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS
+from app.ingestion.site_documents import (
+    MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS, MAX_TEXT_UPLOAD_CHARS, MAX_TEXT_UPLOAD_WORDS,
+)
 from app.ingestion.public_site import source_type
 
 FILE_PREFIX = "/api/v1/ingestion/files/"
@@ -69,7 +71,7 @@ class SuppliedDocument(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     fetched_at: AwareDatetime
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    text: str = Field(min_length=1, max_length=MAX_DOCUMENT_CHARS)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_UPLOAD_CHARS)
     storage_key: UUID
     original_filename: str = Field(min_length=1, max_length=200)
     media_type: Literal["application/pdf", "text/plain", "text/markdown", "text/html"]
@@ -77,9 +79,12 @@ class SuppliedDocument(BaseModel):
 
     @model_validator(mode="after")
     def integrity(self) -> Self:
+        max_chars, max_words = ((MAX_TEXT_UPLOAD_CHARS, MAX_TEXT_UPLOAD_WORDS)
+                                if self.source_type in {"text", "markdown"}
+                                else (MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS))
         if (not valid_source(self.url, self.source_type) or sha256(self.url.encode()).hexdigest() != self.source_id
             or sha256(self.text.encode()).hexdigest() != self.content_sha256 or not self.text.strip()
-            or not self.title.strip() or len(self.text.split()) > MAX_DOCUMENT_WORDS
+            or not self.title.strip() or len(self.text) > max_chars or len(self.text.split()) > max_words
             or any(ord(c) < 32 for c in self.title + self.original_filename)
             or "/" in self.original_filename or "\\" in self.original_filename):
             raise ValueError("Invalid supplied document identity or integrity")

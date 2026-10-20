@@ -45,6 +45,21 @@ def test_file_is_queued_without_extraction_then_published_by_worker(runtime):
     assert not run_once(sessions, settings, services)
 
 
+def test_large_text_upload_gets_extended_worker_budget(runtime):
+    client, sessions, settings, services, headers = runtime
+    settings.ingestion_runner = "worker"
+    content = (b"a" * 550 + b" ") * 101
+    assert len(content) > 50_000
+    response = upload(client, headers["admin"], content)
+    assert response.status_code == 202
+    assert run_once(sessions, settings, services)
+    with sessions() as db:
+        job = db.get(IngestionJob, response.json()["job_id"])
+        assert job.status == "completed"
+        assert job.result["indexed_chunks"] > 1
+        assert job.lease_expires_at - job.started_at > timedelta(hours=3)
+
+
 def test_queued_jobs_run_serially_and_retry_the_fixed_snapshot(runtime):
     client, sessions, settings, services, headers = runtime
     settings.ingestion_runner = "worker"

@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from pydantic import ValidationError
 
 from app.ingestion.extraction import ExtractionError
-from app.ingestion.job_store import claim, fail
+from app.ingestion.job_store import claim, extend_lease, fail
 from app.ingestion.materialize import materialize
 from app.ingestion.site_index import IndexingError, WebsiteIndexer
 from app.ingestion.sitemap_jobs import run_crawl
 from app.ingestion.sync_sources import process
+from app.ingestion.site_documents import MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,16 @@ def run_job(sessions: sessionmaker[Session], job_id: str, indexer: WebsiteIndexe
             result = run_crawl(sessions, run, indexer.settings)
         else:
             run = materialize(sessions, run, indexer.settings)
+            if (indexer.settings.ingestion_runner == "worker"
+                and any(
+                    document.source_type in {"text", "markdown"}
+                    and (len(document.text) > MAX_DOCUMENT_CHARS
+                         or len(document.text.split()) > MAX_DOCUMENT_WORDS)
+                    for document in run.request.documents
+                )):
+                budget = indexer.settings.large_text_import_timeout_seconds
+                extend_lease(sessions, run, budget)
+                indexer.extend_deadline(budget)
             result = process(sessions, run, indexer)
     except Exception as exc:
         if isinstance(exc, ExtractionError):

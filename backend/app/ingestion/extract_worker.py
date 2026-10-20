@@ -19,7 +19,9 @@ from pypdf import PdfReader
 
 from app.ingestion.documents import valid_sitemap_url, valid_web_url
 from app.ingestion.public_site import extract_document, source_type, USER_AGENT
-from app.ingestion.site_documents import MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS
+from app.ingestion.site_documents import (
+    MAX_DOCUMENT_CHARS, MAX_DOCUMENT_WORDS, MAX_TEXT_UPLOAD_CHARS, MAX_TEXT_UPLOAD_WORDS,
+)
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_HTML_BYTES = 3 * 1024 * 1024
@@ -34,11 +36,12 @@ class ExtractionFailure(ValueError):
     """Controlled messages that are safe to return without imported text."""
 
 
-def bounded_text(text: str) -> str:
+def bounded_text(text: str, *, max_chars: int = MAX_DOCUMENT_CHARS,
+                 max_words: int = MAX_DOCUMENT_WORDS) -> str:
     text = text.strip()
     if not text or "\x00" in text:
         raise ExtractionFailure("Document has no usable text; scanned PDFs require OCR")
-    if len(text) > MAX_DOCUMENT_CHARS or len(text.split()) > MAX_DOCUMENT_WORDS:
+    if len(text) > max_chars or len(text.split()) > max_words:
         raise ExtractionFailure("Extracted document exceeds the text limit; split it into smaller documents")
     return text
 
@@ -48,7 +51,8 @@ def file_text(raw: bytes, kind: str) -> str:
         raise ExtractionFailure("File must contain between 1 byte and 5 MiB")
     if kind in {"text", "markdown"}:
         try:
-            return bounded_text(raw.decode("utf-8-sig"))
+            return bounded_text(raw.decode("utf-8-sig"), max_chars=MAX_TEXT_UPLOAD_CHARS,
+                                max_words=MAX_TEXT_UPLOAD_WORDS)
         except UnicodeError as exc:
             raise ExtractionFailure("Text and Markdown files must use UTF-8 encoding") from exc
     if kind != "pdf" or not raw.startswith(b"%PDF-"):

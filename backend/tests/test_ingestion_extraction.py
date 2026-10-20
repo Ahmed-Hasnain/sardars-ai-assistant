@@ -43,8 +43,11 @@ def test_reject_scanned_encrypted_oversized_and_broken_pdfs(raw):
 
 
 def test_text_resource_limit_and_subprocess_timeout(monkeypatch):
+    assert len(extraction.extract_file(b"a" * 50_001, "text")) == 50_001
     with pytest.raises(extraction.ExtractionError, match="text limit"):
-        extraction.extract_file(b"a" * 50_001, "text")
+        extraction.extract_file(b"a" * 250_001, "text")
+    with pytest.raises(extraction.ExtractionError, match="text limit"):
+        extraction.extract_file(b"a " * 30_001, "markdown")
     def timeout(*args, **kwargs):
         assert kwargs["timeout"] == 30
         raise subprocess.TimeoutExpired("test", 30)

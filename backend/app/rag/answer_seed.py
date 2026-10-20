@@ -77,6 +77,14 @@ COMPANY_DESCRIPTION = re.compile(
     re.I,
 )
 COMPANY_CATEGORY = re.compile(r"\b(?:sanitary|bathroom|fittings|tiles|products|store|retail)\b", re.I)
+FAQ_PAIR = re.compile(
+    r"\b[A-Z][A-Z0-9_-]{2,48}-FAQ-\d{3,5}\s*\|\s*"
+    r"(?P<question>[^?]{4,300}\?)\s+Answer:\s*"
+    r"(?P<answer>.+?)(?=\s+Question origin:|\s+[A-Z][A-Z0-9_-]{2,48}-FAQ-\d{3,5}\s*\||$)",
+    re.I | re.S,
+)
+FAQ_QUESTION_SENTENCE = re.compile(r"\b[A-Z][A-Z0-9_-]{2,48}-FAQ-\d{3,5}\s*\|", re.I)
+FAQ_PREFIX = re.compile(r"^(?:(?:please|can you|could you|would you)\s+)?tell me\s+", re.I)
 
 SYSTEM_PROMPT = (
     "You answer questions about Sardars using only the numbered source excerpts "
@@ -169,6 +177,29 @@ def _terms(text: str) -> set[str]:
     }
 
 
+def _faq_question_key(question: str) -> str:
+    question = FAQ_PREFIX.sub("", question.strip())
+    return " ".join(WORD_PATTERN.findall(question.replace("&", " and ").lower()))
+
+
+def _faq_answer(question: str, excerpts: list[Evidence]) -> CitedAnswer | None:
+    """Use a complete approved FAQ pair only for the same explicit question."""
+    key = _faq_question_key(question)
+    for excerpt in excerpts:
+        if not excerpt.url.startswith("/api/v1/ingestion/files/"):
+            continue
+        for pair in FAQ_PAIR.finditer(excerpt.text):
+            if key != _faq_question_key(pair.group("question")):
+                continue
+            answer = " ".join(pair.group("answer").split())
+            if (not 10 <= len(answer) <= MAX_SENTENCE_CHARS
+                or _contains_prompt_instruction(answer)
+                or unsafe_descriptive_claim(answer)):
+                continue
+            return CitedAnswer(f"{answer} [1]", [excerpt.cited_source(1)])
+    return None
+
+
 def _matching_sentences(
     question: str, excerpts: list[Evidence]
 ) -> list[Evidence]:
@@ -185,6 +216,7 @@ def _matching_sentences(
             sentence = sentence.strip()
             if (
                 len(sentence) > MAX_SENTENCE_CHARS
+                or FAQ_QUESTION_SENTENCE.search(sentence)
                 or _contains_prompt_instruction(sentence)
                 or unsafe_descriptive_claim(sentence)
             ):
@@ -424,6 +456,9 @@ async def answer_from_points(
         return CitedAnswer(FALLBACK, [])
 
     excerpts = _approved_excerpts(points)
+    faq_answer = _faq_answer(question, excerpts)
+    if faq_answer is not None:
+        return faq_answer
     brand_answer = _brand_list_answer(question, excerpts)
     if brand_answer is not None:
         return brand_answer
