@@ -189,6 +189,20 @@ def test_chat_routes_exact_product_price_question_to_tool_flow() -> None:
     product.assert_awaited_once()
 
 
+@pytest.mark.parametrize("message", ["What would TEST-1 set me back?", "Any TEST-2 left?"])
+def test_sku_paraphrases_still_use_authorized_database_lookup(message: str) -> None:
+    with (
+        patch("app.api.chat.answer_product", new_callable=AsyncMock) as product,
+        patch("app.api.chat.answer_company", new_callable=AsyncMock) as company,
+    ):
+        product.return_value = ChatResponse(answer="database result", route="product", model=None)
+        response = client.post("/api/v1/chat", json={"message": message})
+    assert response.status_code == 200
+    assert response.json()["route"] == "product"
+    product.assert_awaited_once()
+    company.assert_not_awaited()
+
+
 def test_chat_routes_combined_product_request_and_passes_followup_handles() -> None:
     combined = ChatResponse(answer="matching product", route="product_search", model=None,
                             product_handles=["basin-one"])
@@ -219,6 +233,7 @@ def test_chat_routes_combined_product_request_and_passes_followup_handles() -> N
     "what kind of fans fo sardars sell",
     "Show me kitchen accessories",
     "Find outdoor lighting",
+    "Point me to basin mixers",
 ])
 def test_natural_browsing_questions_use_catalog_tool_flow(message) -> None:
     with (

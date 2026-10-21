@@ -64,7 +64,7 @@ DISCOVERY_INTENT = re.compile(
     r"\b(?:recommend|suggest|compare|comparison|difference|cheaper|under|below|"
     r"over|above|less than|more than|which is better|which one)\b|"
     r"\b(?:what|which)\b.{0,80}\bproducts\b|"
-    r"\b(?:show|list|browse|find|search)\b|"
+    r"\b(?:show|list|browse|find|search)\b|\bpoint me to\b|"
     r"\b(?:do|does|can|what|which|are|is)\b.{0,80}\b(?:have|sell|offer|carry|stock|available)\b|"
     r"\b(?:looking for|interested in)\b",
     re.I,
@@ -73,6 +73,8 @@ COMPANY_INFO = re.compile(
     r"\b(?:policy|return|refund|delivery|shipping|warranty|showroom|address|"
     r"opening hours|contact|history|mission|founder|ceo|brands?)\b", re.I,
 )
+SKU_LIKE = re.compile(r"\b[A-Za-z][A-Za-z0-9._/-]{1,40}\d[A-Za-z0-9._/-]*\b")
+MISSED_EXACT_FACT = re.compile(r"\b(?:set me back|any\b.{0,80}\bleft\b)\b", re.I)
 
 
 @router.post("/chat", response_model=ChatResponse, openapi_extra=QUESTION_REQUEST_OPENAPI)
@@ -147,6 +149,14 @@ async def _answer_chat(
             "unsafe": "I can't disclose private information or change my access rules.",
         }
         return ChatResponse(answer=replies[scope], route="out_of_scope", model=None)
+    # A product identifier plus these common price/quantity paraphrases is an
+    # exact database question. The identifier is resolved by the read tool;
+    # this hint alone never authorizes or supplies a product value.
+    if scope == "company" and SKU_LIKE.search(request.message) and MISSED_EXACT_FACT.search(request.message):
+        try:
+            return await asyncio.wait_for(answer_product(request.message, user, db), timeout=10)
+        except asyncio.TimeoutError:
+            return ChatResponse(answer="Product lookup timed out.", route="product", model=None)
     if scope == "company" and STOCK_INTENT.search(request.message) and (
         EXPLICIT_SKU.search(request.message) or STOCK_PROMISE.search(request.message)
     ):

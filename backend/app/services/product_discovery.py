@@ -24,6 +24,7 @@ CHANGING_CLAIM = re.compile(r"\b(?:price|prices|priced|stock|inventory|available
 NON_DESCRIPTION = re.compile(r"^(?:article numbers?|art no\.?|net weight|frequently asked questions)\b", re.I)
 COMPARISON = re.compile(r"\b(?:compare|comparison|difference|cheaper|lowest|less expensive)\b", re.I)
 RECOMMENDATION = re.compile(r"\b(?:recommend|suggest)\b", re.I)
+DESCRIPTION_REQUEST = re.compile(r"\b(?:product page|description|describe)\b", re.I)
 
 
 def _description(points: list[dict], url: str, specifications: dict[str, str]) -> tuple[str, SourceCitation] | None:
@@ -57,7 +58,8 @@ async def answer_product_discovery(
 ) -> ChatResponse:
     call = ToolInvocation(name="search_products", arguments={
         "question": question, "context_handles": context_handles or [],
-        "prefer_descriptions": bool(RECOMMENDATION.search(question) and not context_handles),
+        "prefer_descriptions": bool((RECOMMENDATION.search(question) or DESCRIPTION_REQUEST.search(question))
+                                    and not context_handles),
     })
     result = await run_in_threadpool(execute_tool, call, db, user)
     if not isinstance(result, ToolSuccess) or not isinstance(result.data, ProductSearchResults):

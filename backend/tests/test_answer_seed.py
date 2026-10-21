@@ -68,6 +68,19 @@ def test_faq_needs_a_complete_safe_pair_and_matching_question() -> None:
     model.chat.assert_not_called()
 
 
+def test_broad_company_history_does_not_use_a_brand_history_passage() -> None:
+    point = _point()
+    point["payload"]["text"] = (
+        "Bongio is an Italian brand with a rich history of design and craftsmanship."
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points(
+        "What does Sardars say about its history?", [point], model,
+    ))
+    assert result.text == FALLBACK and result.sources == []
+    model.chat.assert_not_called()
+
+
 def test_qualified_faq_answers_are_not_rejected_for_safety_words() -> None:
     cases = (
         ("010", "Does Sardars serve both homeowners and professionals?",

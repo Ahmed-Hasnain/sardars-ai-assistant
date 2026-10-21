@@ -36,6 +36,7 @@ STOP = frozenset({
     "there", "sell", "sells", "sold", "offer", "offers", "carry", "carries", "stock",
     "looking", "interested", "collection", "collections", "range", "ranges",
     "check", "database", "some", "now", "kind", "category", "categories",
+    "page", "pages", "say", "says", "description", "descriptions", "point",
 })
 BROAD_BROWSE = re.compile(r"\b(?:products|catalog|catalogue|items)\b", re.I)
 FINISH_TERMS = frozenset({"black", "white", "chrome", "gold", "silver", "gunmetal", "bronze", "copper"})

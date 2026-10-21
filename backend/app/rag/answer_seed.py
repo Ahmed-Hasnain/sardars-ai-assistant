@@ -60,6 +60,10 @@ PRODUCT_CODE = re.compile(r"\b[A-Z]{1,6}(?:-[A-Z0-9]{2,12}){1,4}\b", re.I)
 PRODUCT_SIZE = re.compile(r"\bSize:\s*(\d{2,4}\s*[*x×]\s*\d{2,4}\s*[*x×]\s*\d{2,4}\s*mm)\b", re.I)
 DESCRIPTION_REQUEST = re.compile(r"\b(?:how\s+does.+describe|describe)\b", re.I)
 HISTORY_QUESTION = re.compile(r"^\s*how old is sardars\s*\?\s*$", re.I)
+COMPANY_HISTORY_REQUEST = re.compile(
+    r"\b(?:sardars?|sardar and co)\b.{0,100}\bhistory\b|"
+    r"\bhistory\b.{0,100}\b(?:sardars?|sardar and co)\b", re.I,
+)
 AUTHENTICATED_EXPORT_QUESTION = re.compile(r"\bauthenticated\b.*\bInstagram\b.*\bexport\b", re.I)
 SUPPORTED_CLAIM = re.compile(r"([^.!?\n]+[.!?]?)\s*\[(\d+)\]")
 QUESTION_FILLER = {
@@ -719,6 +723,12 @@ async def answer_from_points(
         return _qualified_current_faq_answer(faq_answer) or CitedAnswer(FALLBACK, [])
     if faq_answer is not None:
         return faq_answer
+    # A brand's history in a retrieved article is not Sardars' history. The
+    # uploaded FAQ handles its explicit historical questions above; broader
+    # wording abstains until a directly answerable company-history source is
+    # selected and reviewed.
+    if COMPANY_HISTORY_REQUEST.search(question):
+        return CitedAnswer(FALLBACK, [])
     brand_answer = _brand_list_answer(question, excerpts)
     if brand_answer is not None:
         return brand_answer

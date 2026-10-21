@@ -95,6 +95,21 @@ def test_filter_requires_same_variant_finish_and_price_with_role_and_status(cata
         assert invoke(db, "Recommend shower mixers under 1000").data.matches[0].handle == "black-shower-mixer"
 
 
+def test_request_for_product_page_description_does_not_filter_out_catalog_match(catalog):
+    with catalog() as db:
+        result = invoke(db, "Which black wall mounted basin mixers are under 1000, and what does their product page say?")
+    assert result.ok
+    assert [(match.handle, match.sku) for match in result.data.matches] == [
+        ("black-basin-mixer", "BASIN-BLACK")]
+
+
+def test_point_me_to_is_a_browse_phrase_not_a_catalog_filter(catalog):
+    with catalog() as db:
+        result = invoke(db, "Point me to basin mixers")
+    assert result.ok and result.data.matches
+    assert all("basin" in match.handle for match in result.data.matches)
+
+
 def test_stock_filter_uses_matching_visible_variant_and_rendered_quantity(catalog, monkeypatch):
     monkeypatch.setattr(product_discovery, "fetch_product_points", lambda *args: [])
     actor = SimpleNamespace(role="staff", is_active=True)
