@@ -41,11 +41,15 @@ def test_latency_distribution_uses_median_and_nearest_rank_p95():
 
 def test_e4_cases_cover_every_upload_and_both_roles():
     cases = load_cases(run_e4.CASES_PATH)
+    baseline = load_cases(run_e4.CASES_PATH.with_name("e4_cases_baseline.json"))
     assert len(cases) == 21
+    assert len(baseline) == 21
     assert {case.role for case in cases} == {"staff", "admin"}
     assert len({case.expected_source for case in cases
                 if case.expected_source and case.expected_source.startswith("/api/")}) == 3
-    assert sum(case.abstain for case in cases) == 6
+    assert sum(case.abstain for case in cases) == 5
+    assert sum(case.abstain for case in baseline) == 6
+    assert next(case for case in cases if case.id == "current_rating").expected_source
 
 
 def test_faq_audit_distinguishes_question_guards_and_partial_answer_candidates():

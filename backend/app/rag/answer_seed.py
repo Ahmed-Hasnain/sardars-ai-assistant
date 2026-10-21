@@ -36,6 +36,11 @@ CHANGING_FACT_PATTERN = re.compile(
     r"\b(?:current|today|latest|price|prices|pricing|stock|inventory|"
     r"availability|available|discount|promotion|sale)\b", re.I
 )
+UNVERIFIED_CURRENT_ANSWER = re.compile(
+    r"\b(?:not\s+(?:been\s+)?(?:verified|refreshed|confirmed)|"
+    r"cannot\s+(?:verify|confirm)|can't\s+(?:verify|confirm))\b", re.I
+)
+ASSERTED_LIVE_TIME = re.compile(r"\b(?:currently|today|right\s+now|latest)\b", re.I)
 EXACT_FACT_PATTERN = re.compile(
     r"\b(?:return|refund|warranty|guarantee|delivery|shipping|order|policy|"
     r"address|opening hours|ceo|founder|owner|director|employee|staff|"
@@ -198,6 +203,22 @@ def _faq_answer(question: str, excerpts: list[Evidence]) -> CitedAnswer | None:
                 continue
             return CitedAnswer(f"{answer} [1]", [excerpt.cited_source(1)])
     return None
+
+
+def _qualified_current_faq_answer(answer: CitedAnswer | None) -> CitedAnswer | None:
+    """Allow an exact FAQ refusal to explain a missing live value, never assert one."""
+    if answer is None:
+        return None
+    text = answer.text.removesuffix(" [1]")
+    if (not UNVERIFIED_CURRENT_ANSWER.search(text)
+        or NUMBER_PATTERN.search(text)
+        or ASSERTED_LIVE_TIME.search(text)):
+        return None
+    return CitedAnswer(
+        "The cited FAQ does not verify a current value for this question. "
+        "Check the appropriate live source before quoting one. [1]",
+        answer.sources,
+    )
 
 
 def _matching_sentences(
@@ -452,11 +473,10 @@ async def answer_from_points(
     """Use matching source sentences and reject unsupported model output."""
     if not question.strip():
         raise ValueError("Question cannot be blank")
-    if CHANGING_FACT_PATTERN.search(question) or UNVERIFIED_BUSINESS_FACT.search(question):
-        return CitedAnswer(FALLBACK, [])
-
     excerpts = _approved_excerpts(points)
     faq_answer = _faq_answer(question, excerpts)
+    if CHANGING_FACT_PATTERN.search(question) or UNVERIFIED_BUSINESS_FACT.search(question):
+        return _qualified_current_faq_answer(faq_answer) or CitedAnswer(FALLBACK, [])
     if faq_answer is not None:
         return faq_answer
     brand_answer = _brand_list_answer(question, excerpts)

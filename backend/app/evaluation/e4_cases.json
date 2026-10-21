@@ -176,9 +176,13 @@
     "question": "What is Sardars current Google rating?",
     "category": "company",
     "expected_route": "company",
-    "expected_source": null,
-    "answer_contains": [],
-    "abstain": true
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "does not verify a current value"
+    ],
+    "answer_not_contains": [
+      "4.8 stars"
+    ]
   },
   {
     "id": "policy",

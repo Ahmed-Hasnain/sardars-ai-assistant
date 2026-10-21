@@ -69,6 +69,8 @@ E4 implementation checkpoint (2026-10-19): the admin browser workflow, worker-ba
 
 E4 measured exit (2026-10-21): the live corpus, durable job outcomes, original/snapshot/vector integrity, real authenticated HTTP/browser journey, 21-case answer set and retained suites were evaluated. Current-corpus upload exclusion improved strict cases from 8/21 to 13/21 and selected expected-source hits from 3/15 to 15/15; six unsupported-claim cases abstained. The historical before-upload answers and per-batch questions were not saved, so this substituted ablation cannot claim a historical effect. Four of the original six full-site cases still fail on the current corpus, and five other retained cases now fail. These remain E5 work, not E4 successes. See `docs/e4_real_data_baseline.md` and `IMPLEMENTATION_STATUS.md`.
 
+E4 qualified-FAQ follow-up (2026-10-21): A later answer-layer refinement permits an exact approved FAQ to explain that a requested live value was not verified, with a citation and without asserting any current value. The original 21-case expectations are preserved in `e4_cases_baseline.json`; the active case file expects this qualification for the Google-rating question. The replay remained 13/21 with stable data. This does not change E5's separate plan to measure a grounded model path for descriptive questions, or the rule that current SKU, price and stock come from PostgreSQL.
+
 After this exit, finish and record the deferred E1 data-backed checks above. Do not infer E1 completion from E4's UI or job status alone.
 
 ## E5 — Close full-corpus retrieval and evidence regressions

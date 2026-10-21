@@ -35,7 +35,7 @@ The earlier remove/restore jobs and FAQ replacement remain in the durable ledger
 
 ## Answer baseline and upload comparison
 
-The frozen 21-case file covers each upload, exact FAQ questions and paraphrases, website evidence, both roles, and six unsupported/current claims. These are engineering probes, including research-document questions, not a representative sample of observed staff traffic.
+The original frozen 21-case file is retained as `backend/app/evaluation/e4_cases_baseline.json`; the original `answers.json` also stores its definitions and hash. It covers each upload, exact FAQ questions and paraphrases, website evidence, both roles, and six unsupported/current claims. These are engineering probes, including research-document questions, not a representative sample of observed staff traffic. The default `e4_cases.json` was later revised for the qualified current-rating answer described below; the table remains the original pre-change baseline.
 
 | Measurement | Current corpus | Same corpus with the three uploads excluded before ranking |
 | --- | ---: | ---: |
@@ -98,6 +98,12 @@ A separate eight-case retrieval probe confirms the failing boundary (ranks count
 | OMSA HY524 | 3 | 1 |
 
 The seat case has the complete correct materials sentence among three matching excerpts; the answer chooses the shorter sibling-product sentence. The bathtub matches contain only the trailing specification fragments. These require different evidence-selection fixes from the five semantic top-32 misses. Full matches and source identities are saved in `retrieval_diagnosis.json`; stored-source phrase presence is saved in `retained_source_coverage.json`.
+
+### Focused FAQ guard follow-up, 2026-10-21
+
+The exact FAQ question about a **current Google rating** had its complete answer in selected evidence, but the broad changing-fact question check returned the generic fallback before exact FAQ handling. The file itself says no matched live Google listing was refreshed and its earlier rating must not be quoted as current. The answer path now permits only an exact approved FAQ whose answer explicitly says a live value was not verified, contains no numeral, and makes no `currently`/`today`/`latest` assertion. It renders a fixed cited non-verification explanation rather than trusting source prose to state a value. Current price, stock, opening-hours and unsupported current claims remain guarded; this does not give the LLM authority over live facts.
+
+The original case definition is preserved in `e4_cases_baseline.json`. The default `e4_cases.json` now expects the cited qualification for this one case. Authenticated local API checks passed for the rating question, the unchanged ratings-difference answer, and continued opening-hours abstention. The post-change 21-case replay in `post_qualified_faq.json` remained **13/21**, made three model calls, and reported unchanged SQL and Qdrant fingerprints. Compared case-by-case with the original `answers.json`, only `current_rating` changed answer text; every case kept its original pass/fail result. The eight other E4 failures remain open. One model call in the serial replay took 230.7 seconds, so its 0.819/55.932-second median/p95 does not represent a guaranteed response target. The backend suite passed **656 tests, four skipped**; this follow-up did not reindex sources or reset volumes.
 
 ## Authentication and browser evidence
 

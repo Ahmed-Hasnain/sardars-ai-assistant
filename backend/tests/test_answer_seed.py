@@ -68,6 +68,64 @@ def test_faq_needs_a_complete_safe_pair_and_matching_question() -> None:
     model.chat.assert_not_called()
 
 
+def test_exact_current_rating_faq_explains_missing_live_value_without_quoting_one() -> None:
+    point = _faq_point(
+        "SARDARS-FAQ-237 | What is Sardars current Google rating? "
+        "Answer: A matched live Google listing was not refreshed in this research. "
+        "The earlier rating should not be presented as current. "
+        "Question origin: anticipated_customer_question"
+    )
+    model = AsyncMock()
+
+    result = asyncio.run(answer_from_points(
+        "What is Sardars current Google rating?", [point], model
+    ))
+
+    assert "does not verify a current value" in result.text
+    assert "rating should not" not in result.text
+    assert result.sources[0].url == point["payload"]["url"]
+    assert result.text.endswith("[1]")
+    model.chat.assert_not_called()
+
+
+def test_changing_fact_faq_needs_an_exact_safe_refusal() -> None:
+    model = AsyncMock()
+    safe = _faq_point(
+        "SARDARS-FAQ-237 | What is Sardars current Google rating? "
+        "Answer: A matched live listing was not refreshed in this research. "
+        "Question origin: anticipated_customer_question"
+    )
+    numbered = _faq_point(
+        "SARDARS-FAQ-237 | What is Sardars current Google rating? "
+        "Answer: The rating was not refreshed, but the current score is 4.8 stars. "
+        "Question origin: anticipated_customer_question"
+    )
+    asserted = _faq_point(
+        "SARDARS-FAQ-237 | What is Sardars current Google rating? "
+        "Answer: The listing was not refreshed, but Sardars is currently five stars. "
+        "Question origin: anticipated_customer_question"
+    )
+    for question, point in (
+        ("What is Sardars current Google rating?", numbered),
+        ("What is Sardars current Google rating?", asserted),
+        ("What is Sardars current Google rating?", _faq_point(
+            "SARDARS-FAQ-237 | What is Sardars current Google rating? "
+            "Answer: The current rating is five stars. Question origin: test")),
+        ("What is Sardars rating now?", safe),
+        ("What is the current price?", _faq_point(
+            "SARDARS-FAQ-238 | What is the current price? "
+            "Answer: The price was not refreshed. Question origin: test")),
+    ):
+        result = asyncio.run(answer_from_points(question, [point], model))
+        assert result.text == FALLBACK and result.sources == []
+    safe["payload"]["review_status"] = "pending"
+    denied = asyncio.run(answer_from_points(
+        "What is Sardars current Google rating?", [safe], model
+    ))
+    assert denied.text == FALLBACK and denied.sources == []
+    model.chat.assert_not_called()
+
+
 def test_product_heading_identifies_subject_but_body_must_support_requested_feature():
     point = _point()
     point["payload"].update(url="https://sardarandco.com/products/square-e-ceramic-wall-mounted-or-vessel-corner-sink",
