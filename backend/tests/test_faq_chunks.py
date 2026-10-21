@@ -37,3 +37,17 @@ def test_regular_documents_keep_overlapping_chunks() -> None:
     chunks = chunk_record(_record(" ".join(f"word{number}" for number in range(190))))
     assert [len(chunk["text"].split()) for chunk in chunks] == [100, 100, 20]
     assert chunks[0]["text"].split()[-15:] == chunks[1]["text"].split()[:15]
+
+
+def test_shadow_structure_policy_keeps_sections_and_faq_pairs() -> None:
+    text = (
+        "Product summary " + " ".join(f"intro{number}" for number in range(80)) + "\n\n"
+        "Product details " + " ".join(f"detail{number}" for number in range(35)) + "\n\n"
+        "SARDARS-FAQ-001 | What is the product material?\n"
+        "Answer: The source describes durable ceramic construction."
+    )
+    chunks = chunk_record(_record(text), structure_aware=True)
+    assert len(chunks) == 3
+    assert "detail0" not in chunks[0]["text"]
+    assert "intro79" not in chunks[1]["text"]
+    assert "What is the product material? Answer:" in chunks[2]["text"]

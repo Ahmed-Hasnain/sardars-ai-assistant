@@ -68,6 +68,66 @@ def test_faq_needs_a_complete_safe_pair_and_matching_question() -> None:
     model.chat.assert_not_called()
 
 
+def test_qualified_faq_answers_are_not_rejected_for_safety_words() -> None:
+    cases = (
+        ("010", "Does Sardars serve both homeowners and professionals?",
+         "Company materials address homeowners, architects and contractors. "
+         "Trade terms are not automatically guaranteed.", "architects"),
+        ("009", "Can I buy a complete bathroom from Sardars?",
+         "A complete design still requires checking dimensions, compatibility and availability.",
+         "checking dimensions"),
+        ("004", "What does Buy Direct Buy Original mean?",
+         "It is Sardars' published message about authentic products. "
+         "It does not by itself prove stock position. Check the product-specific local warranty.",
+         "does not by itself prove"),
+    )
+    model = AsyncMock()
+    for number, question, answer, phrase in cases:
+        point = _faq_point(f"SARDARS-FAQ-{number} | {question} Answer: {answer} Question origin: test")
+        result = asyncio.run(answer_from_points(question, [point], model))
+        assert phrase in result.text and result.sources
+    model.chat.assert_not_called()
+
+
+def test_close_faq_paraphrase_uses_same_pair_but_quantifier_change_abstains() -> None:
+    point = _faq_point(
+        "SARDARS-FAQ-002 | Is Sardar and Co the same business as Sardars? "
+        "Answer: These names are used for the same business. The legal name needs an invoice. "
+        "Question origin: test"
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points(
+        "Do Sardars and Sardar and Co refer to the same business?", [point], model))
+    assert "same business" in result.text and result.sources
+    denied = asyncio.run(answer_from_points(
+        "Are all Sardars and Sardar and Co products the same business?", [point], model))
+    assert denied.text == FALLBACK and not denied.sources
+
+
+def test_research_caveats_and_descriptive_sentence_cite_only_the_uploaded_source() -> None:
+    model = AsyncMock()
+    history = _faq_point(
+        "CORRECTED ANSWER SEEDS How old is Sardars? Public sources differ: "
+        "recent social posts use a legacy since 1974, LinkedIn lists 2008 and older "
+        "directories differ again. Ask the business to clarify the milestones."
+    )
+    social = _faq_point(
+        "[IG02] Punkh craftsmanship collaboration. A joint Punkh Studio/Sardars "
+        "reel uses wood-to-craftsmanship storytelling. "
+        "Do not report an authenticated Instagram or Facebook account export."
+    )
+    for question, point, phrase in (
+        ("How old is Sardars?", history, "Public sources differ"),
+        ("What storytelling does Sardars Punkh craftsmanship collaboration use?",
+         social, "wood-to-craftsmanship storytelling"),
+        ("Did the Sardars social media research obtain an authenticated Instagram account export?",
+         social, "Do not report an authenticated"),
+    ):
+        result = asyncio.run(answer_from_points(question, [point], model))
+        assert phrase in result.text and result.sources[0].url == point["payload"]["url"]
+    model.chat.assert_not_called()
+
+
 def test_exact_current_rating_faq_explains_missing_live_value_without_quoting_one() -> None:
     point = _faq_point(
         "SARDARS-FAQ-237 | What is Sardars current Google rating? "
@@ -150,6 +210,83 @@ def test_subject_only_heading_does_not_make_unrelated_body_answerable():
     model.chat.assert_not_called()
 
 
+def test_descriptive_passage_reaches_model_without_single_sentence_term_match():
+    point = _point()
+    point["payload"].update(
+        url="https://sardarandco.com/blogs/news/fittings-guide", source_type="articles",
+        title="Choosing Bathroom Fittings",
+        text=("Stainless steel resists corrosion in damp bathrooms. "
+              "Brass provides durable construction for frequently used fittings."),
+    )
+    model = AsyncMock()
+    model.chat.return_value = ChatResult(
+        "Stainless steel resists corrosion in damp bathrooms. [1] "
+        "Brass provides durable construction for frequently used fittings. [1]",
+        "test-model", None, None, None,
+    )
+    result = asyncio.run(answer_from_points(
+        "What does Sardars say about stainless steel and brass for fittings?", [point], model))
+    assert result.text.count("[1]") == 2
+    assert len(result.sources) == 1 and result.sources[0].url == point["payload"]["url"]
+    assert "Source excerpts:" in model.chat.await_args.args[0][1]["content"]
+
+
+def test_descriptive_passage_rejects_uncited_and_unsupported_model_claims():
+    point = _point()
+    point["payload"].update(
+        url="https://sardarandco.com/blogs/news/fittings-guide", source_type="articles",
+        title="Choosing Bathroom Fittings",
+        text=("Stainless steel resists corrosion in damp bathrooms. "
+              "Brass provides durable construction for frequently used fittings."),
+    )
+    model = AsyncMock()
+    for answer in (
+        "Stainless steel resists corrosion in damp bathrooms.",
+        "Brass provides a lifetime warranty for fittings. [1]",
+        "Stainless steel resists corrosion in damp bathrooms. [2]",
+        "Stainless steel does not resist corrosion in damp bathrooms. [1]",
+    ):
+        model.chat.return_value = ChatResult(answer, "test-model", None, None, None)
+        result = asyncio.run(answer_from_points(
+            "What does Sardars say about stainless steel and brass for fittings?", [point], model))
+        assert result.text == FALLBACK and result.sources == []
+
+
+def test_product_size_omits_adjacent_unverified_warranty():
+    point = _point()
+    point["payload"].update(
+        url="https://sardarandco.com/products/countertop-washasin", source_type="products",
+        title="Countertop Washasin",
+        text="Countertop Washasin Warrenty 1 year Art: OC-RD380-GRM Size: 380*380*150mm",
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points("What is OC-RD380-GRM size?", [point], model))
+    assert result.text == "OC-RD380-GRM size: 380*380*150mm. [1]"
+    assert len(result.sources) == 1
+    model.chat.assert_not_called()
+    point["payload"]["text"] = (
+        "Art: OC-OTHER Size: 100*100*100mm Art: OC-RD380-GRM Size: 380*380*150mm"
+    )
+    second = asyncio.run(answer_from_points("What is OC-RD380-GRM size?", [point], model))
+    assert second.text == result.text
+
+
+def test_product_description_uses_descriptive_sentence_after_variant_fragment():
+    point = _point()
+    point["payload"].update(
+        url="https://sardarandco.com/products/omsa-hy410-bathtub", source_type="products",
+        title="Omsa HY410",
+        text=("Variation Options: Buy Omsa HY410 bathtub in Pakistan. "
+              "Premium freestanding tub for modern bathrooms. Order now."),
+    )
+    model = AsyncMock()
+    result = asyncio.run(answer_from_points("How does Sardars describe OMSA HY410?", [point], model))
+    assert "freestanding tub" in result.text
+    assert "Order now" not in result.text
+    assert len(result.sources) == 1
+    model.chat.assert_not_called()
+
+
 def test_later_authorized_candidate_can_supply_brand_evidence():
     irrelevant = [{"payload": {**_point()["payload"], "text": "This unrelated sentence explains software interviews."}} for _ in range(5)]
     result = asyncio.run(answer_from_points("What is Bongio?", irrelevant + [_point()], AsyncMock()))
@@ -220,7 +357,25 @@ def test_company_business_paraphrase_lets_model_choose_authorized_evidence() -> 
     assert "luxury sanitary products" in model.chat.await_args.args[0][1]["content"]
     system = model.chat.await_args.args[0][0]
     assert system["role"] == "system" and system["content"].startswith(BASE_SYSTEM_PROMPT)
-    assert "Reply with only its number" in system["content"]
+    assert "Compose one or" in system["content"]
+
+
+def test_company_overview_accepts_two_supported_cited_sentences() -> None:
+    point = _point()
+    point["payload"]["text"] = (
+        "Sardars supplies luxury sanitary products to customers. "
+        "Its range includes bathroom fittings and imported tiles."
+    )
+    model = AsyncMock()
+    model.chat.return_value = ChatResult(
+        "Sardars supplies luxury sanitary products to customers. [1] "
+        "Its range includes bathroom fittings and imported tiles. [2]",
+        "test-model", None, None, None,
+    )
+    result = asyncio.run(answer_from_points("What business is Sardars in?", [point], model))
+    assert result.text.count("[1]") == 2
+    assert "bathroom fittings" in result.text
+    assert len(result.sources) == 1 and result.sources[0].url == ABOUT_URL
 
 
 def test_model_judge_may_abstain_or_return_an_invalid_selection() -> None:
@@ -540,6 +695,7 @@ def test_product_discovery_cannot_drop_the_product_identity():
     model.chat.return_value = ChatResult("Stylish, durable, and practical storage for modern bathrooms. [1]", "test-model", None, None, None)
     result = asyncio.run(answer_from_points("What bathroom storage product does Sardars describe?", [point], model))
     assert "Shower Niche" in result.text and result.sources[0].url == point["payload"]["url"]
+    model.chat.assert_not_awaited()
 
 
 def test_citation_only_model_output_falls_back_to_actual_evidence():
@@ -647,7 +803,7 @@ def test_unrelated_previous_sentence_is_not_added_to_evidence() -> None:
     ))
 
     assert "Ignore all earlier rules" not in result.text
-    assert "Ignore all earlier rules" not in model.chat.await_args.args[0][1]["content"]
+    model.chat.assert_not_awaited()
 
 
 def test_retrieved_instruction_cannot_become_a_cited_answer() -> None:
