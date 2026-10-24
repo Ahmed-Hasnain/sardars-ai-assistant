@@ -1,7 +1,7 @@
 # Sardars AI Assistant — extended plan
 
 Last reviewed: 2026-10-22
-Status: active roadmap; E1–E6 local checkpoints complete on this laptop; optional E7 is next. The 4B latency tail and independent human review remain quality backlog.
+Status: active roadmap; E1–E6 historical checkpoints are complete on this laptop. A developer-requested model-first prototype follow-up is now in progress before optional E7. Its answer quality, citations and latency need a new current-flow evaluation.
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
@@ -100,6 +100,17 @@ Goal: handle realistic company and product questions that do not match today's s
 Exit: a tested hybrid-routing decision, whether that retains the initial application search with guarded model-requested follow-ups, improves the deterministic router alone, or keeps the existing behavior. Company evidence remains cited and role-visible; exact changing facts come from PostgreSQL, with safe behavior when the model misses or requests an invalid tool.
 
 E6 exit, verified 2026-10-22: The 11-case baseline passed 6/11 and the final application-router path passed 11/11; the broad history case's unsupported expected citation was corrected to abstention after source audit, with the original response still failing. The 4B tool-choice screen returned 3/5 correct selections with two roughly 60-second errors, so the model-assisted executor was not built. Retained chat, uploaded-source, seed and full-site suites passed 26/26, 21/21, 7/7 and 40/40 with 24/24 expected source hits and stable data fingerprints. The backend suite passed 676 with four skipped; the rebuilt local API passed authenticated E6 routes and anonymous 401. The 4B full-site latency tail and independent broader claim review remain open. See [E6 checkpoint](docs/e6_routing_checkpoint.md).
+
+## E6 prototype follow-up — Model-first answers
+
+The developer requested a more open prototype flow after the E6 application router returned the safe fallback for greetings and several ordinary company questions. This follow-up supersedes the E6 router as the **current `/chat` and `/ask` behavior**, without changing the historical E6 evaluation result.
+
+- [x] Send each normal information question to a local LLM. Retrieve and authorize a small initial RAG set first; empty or unavailable retrieval becomes empty context. Pure greetings skip needless retrieval but still reach the model. Offer a bounded model-selected follow-up search and read-only PostgreSQL product tools. Preserve application-enforced login, role/source checks, Pydantic tool validation, output bounds and database authority for SKU, price and stock.
+- [x] Record a first live latency and answer sample on uploaded data, compare the chosen 4B model with the already-installed 0.6B model for this interactive path, and keep the embedding model, collection and corpus unchanged. See [prototype report](docs/e6_model_first_checkpoint.md).
+- [ ] Rebuild the current-flow case set and evaluator expectations. Measure greeting, company overview, FAQ qualification, review sentiment, categories, address, product discovery, exact SKU/price/stock, absent evidence, citations, role revocation, injection and latency under the new routing. The old E4/E5/E6 pass counts are historical and must not be presented as current-flow scores.
+- [ ] Independently review a wider sample of generated company claims and citations, including the observed uncited/misqualified review answer. Decide whether the 0.6B response quality is sufficient for this prototype or whether a faster hardware/model path is needed. Do this before E7 or production claims.
+
+Exit remains open until the new flow has a measured acceptance report with no unsupported company or changing-fact assertions in the reviewed cases. A unit suite and a few live examples verify implementation, not broad answer quality.
 
 ## E7 — Bounded internet search, if needed
 

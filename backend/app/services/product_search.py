@@ -11,9 +11,12 @@ from sqlalchemy.orm import Session, aliased
 from app.db.models import SourceRegistration
 from app.db.products import Product
 from app.services.product_lookup import _display, _visible
-from app.tools.schemas import ProductSearchArguments, ProductSearchMatch, ProductSearchResults
+from app.tools.schemas import (
+    ProductCategoryResults, ProductSearchArguments, ProductSearchMatch, ProductSearchResults,
+)
 
 MAX_PRODUCTS = 3
+MAX_CATEGORIES = 20
 MAX_VARIANTS_PER_PRODUCT = 32
 MAX_TERMS = 6
 PRODUCT_URL = "https://sardarandco.com/products/"
@@ -43,6 +46,34 @@ FINISH_TERMS = frozenset({"black", "white", "chrome", "gold", "silver", "gunmeta
 OUT_OF_STOCK = re.compile(r"\b(?:out of stock|sold out)\b", re.I)
 IN_STOCK = re.compile(r"\b(?:in stock|with stock|have stock|on hand)\b", re.I)
 PRODUCT_TYPE_TERMS = frozenset({"basin", "mixer", "shower", "bath", "toilet", "sink", "faucet", "tap", "tile", "vanity"})
+
+
+def list_product_categories(db: Session, role: str) -> ProductCategoryResults:
+    """Read a small set of visible, active catalog category labels."""
+    allowed = _visible(role)
+    observed_at = datetime.now(timezone.utc)
+    if not allowed:
+        return ProductCategoryResults(observed_at=observed_at, categories=[], source_file_sha256=[])
+    with db.no_autoflush:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(text("SET LOCAL statement_timeout = '2s'"))
+            db.execute(text("SET LOCAL lock_timeout = '1s'"))
+        rows = db.execute(select(Product.meta_custom_category, func.count()).where(
+            Product.visibility.in_(allowed), Product.source_row_kind == "variant",
+            Product.status == "active", Product.meta_custom_category.is_not(None),
+        ).group_by(Product.meta_custom_category).order_by(
+            func.count().desc(), Product.meta_custom_category,
+        ).limit(MAX_CATEGORIES + 1)).all()
+        categories = [label.strip() for label, _ in rows[:MAX_CATEGORIES]
+                      if label and _display(label.strip())]
+        hashes = db.scalars(select(Product.source_file_sha256).where(
+            Product.visibility.in_(allowed), Product.source_row_kind == "variant",
+            Product.status == "active", Product.meta_custom_category.in_(categories),
+        ).distinct().limit(MAX_CATEGORIES)).all() if categories else []
+    return ProductCategoryResults(
+        observed_at=observed_at, categories=categories,
+        more_categories=len(rows) > MAX_CATEGORIES, source_file_sha256=hashes,
+    )
 
 
 def _price_filter(question: str) -> tuple[Decimal | None, Decimal | None, str | None, bool, bool]:

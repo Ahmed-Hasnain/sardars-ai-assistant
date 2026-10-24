@@ -22,16 +22,16 @@ def staff_user():
 
 
 @pytest.mark.parametrize("endpoint,message,target", [
-    ("/api/v1/chat", "Hello", "app.api.chat.chat_model.chat"),
-    ("/api/v1/chat", "Which brands does Sardars mention?", "app.api.chat.answer_company"),
-    ("/api/v1/ask", "Which brands?", "app.api.ask.answer_company"),
-    ("/api/v1/chat", "Recommend black basin mixers under 1000", "app.api.chat.answer_product_discovery"),
-    ("/api/v1/chat", "What is the price of SKU TEST-1?", "app.api.chat.answer_product"),
+    ("/api/v1/chat", "Hello", "app.api.chat.answer_model_first"),
+    ("/api/v1/chat", "Which brands does Sardars mention?", "app.api.chat.answer_model_first"),
+    ("/api/v1/ask", "Which brands?", "app.api.ask.answer_model_first"),
+    ("/api/v1/chat", "Recommend black basin mixers under 1000", "app.api.chat.answer_model_first"),
+    ("/api/v1/chat", "What is the price of SKU TEST-1?", "app.api.chat.answer_model_first"),
 ])
 def test_slow_answer_returns_safe_timeout_without_partial_citations(monkeypatch, endpoint, message, target):
     monkeypatch.setattr("app.api.answer_deadlines.ANSWER_TIMEOUT_SECONDS", 0.02)
 
-    async def slow(*args):
+    async def slow(*args, **kwargs):
         await asyncio.sleep(1)
         raise AssertionError("slow answer should have been cancelled")
 

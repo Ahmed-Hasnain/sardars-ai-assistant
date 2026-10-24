@@ -8,8 +8,10 @@ from app.llm.base import ChatMessage, ChatResult, ModelError, ModelToolCall, Too
 
 
 class OllamaChatModel:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, output_limit: int = 256, tool_output_limit: int = 256):
         self.settings = settings
+        self.output_limit = output_limit
+        self.tool_output_limit = tool_output_limit
 
     async def chat(self, messages: list[ChatMessage]) -> ChatResult:
         payload = {
@@ -18,7 +20,7 @@ class OllamaChatModel:
             "stream": False,
             "think": False,
             "keep_alive": self.settings.ollama_chat_keep_alive,
-            "options": {"num_predict": 256},
+            "options": {"num_predict": self.output_limit},
         }
 
         try:
@@ -68,7 +70,7 @@ class OllamaChatModel:
             "stream": False,
             "think": False,
             "keep_alive": self.settings.ollama_chat_keep_alive,
-            "options": {"num_predict": 256},
+            "options": {"num_predict": self.tool_output_limit},
         }
         try:
             async with httpx.AsyncClient(timeout=min(self.settings.ollama_timeout_seconds, 60.0)) as client:

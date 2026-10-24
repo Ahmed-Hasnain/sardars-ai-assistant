@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:0.6b"
+    prototype_chat_model: str = "qwen3:0.6b"
     ollama_timeout_seconds: float = 330.0
     ollama_keep_alive: int = 0
     ollama_chat_keep_alive: int = Field(default=300, ge=0, le=600)

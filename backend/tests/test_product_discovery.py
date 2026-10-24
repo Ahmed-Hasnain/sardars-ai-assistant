@@ -60,6 +60,24 @@ def invoke(db, question, role="staff", context=None, prefer_descriptions=False):
     }), db, SimpleNamespace(role=role, is_active=True))
 
 
+def test_catalog_category_tool_checks_role_and_active_rows(catalog):
+    with catalog.begin() as db:
+        for row, label in ((1, "Sanitary Fittings"), (3, "Tiles"),
+                           (5, "Admin Only"), (6, "Archived")):
+            db.get(Product, row).meta_custom_category = label
+    call = ToolInvocation(name="list_product_categories", arguments={})
+    with catalog() as db:
+        staff = execute_tool(call, db, SimpleNamespace(role="staff", is_active=True))
+        admin = execute_tool(call, db, SimpleNamespace(role="admin", is_active=True))
+        denied = execute_tool(call, db, SimpleNamespace(role="staff", is_active=False))
+        invalid = execute_tool(ToolInvocation(name=call.name, arguments={"sql": "SELECT *"}),
+                               db, SimpleNamespace(role="staff", is_active=True))
+    assert staff.ok and set(staff.data.categories) == {"Sanitary Fittings", "Tiles"}
+    assert admin.ok and set(admin.data.categories) == {"Sanitary Fittings", "Tiles", "Admin Only"}
+    assert denied.error.code == "permission_denied"
+    assert invalid.error.code == "invalid_arguments"
+
+
 def test_forged_search_result_cannot_render_instructions(catalog, monkeypatch):
     with catalog() as db:
         normal = invoke(db, "Recommend black basin mixers under 1000")

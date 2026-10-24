@@ -15,15 +15,16 @@ from app.db.models import User
 from app.db.session import get_db
 from app.llm.base import ChatModel, ModelError
 from app.llm.ollama import OllamaChatModel
-from app.rag.routing import scope_question
-from app.rag.answer_seed import FALLBACK
-from app.services.company_answer import answer_company
-from app.schemas.ask import AskResponse, SourceCitation
+from app.schemas.ask import AskResponse
 from app.schemas.chat import ChatRequest
+from app.services.model_assistant import answer_model_first
 
 
 router = APIRouter(prefix="/api/v1", tags=["answers"])
-answer_model: ChatModel = OllamaChatModel(Settings())
+_settings = Settings()
+answer_model: ChatModel = OllamaChatModel(_settings.model_copy(update={
+    "ollama_model": _settings.prototype_chat_model,
+}), output_limit=160, tool_output_limit=96)
 
 
 @router.post("/ask", response_model=AskResponse, openapi_extra=QUESTION_REQUEST_OPENAPI)
@@ -34,14 +35,13 @@ async def ask(
 ) -> AskResponse:
     if request.conversation_id is not None:
         raise HTTPException(status_code=422, detail="Conversation follow-ups use /api/v1/chat")
-    if scope_question(request.message) in {"unsafe", "unsupported_action", "unrelated", "health"}:
-        return AskResponse(answer=FALLBACK, sources=[])
     try:
-        result = await within_answer_deadline(answer_company(request.message, user.role, db, answer_model))
+        result = await within_answer_deadline(answer_model_first(
+            request.message, user, db, answer_model, product_handles=request.product_handles,
+        ))
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="Answer timed out") from exc
     except (httpx.HTTPError, ModelError, SQLAlchemyError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Answer service unavailable") from exc
 
-    sources = [SourceCitation(**vars(source)) for source in result.sources]
-    return AskResponse(answer=result.text, sources=sources)
+    return AskResponse(answer=result.answer, sources=result.sources)

@@ -7,8 +7,8 @@ from time import perf_counter
 from unittest.mock import patch
 
 from app.api import chat
-from app.llm.base import ChatMessage, ChatModel, ChatResult
-from app.services import company_answer, product_answer, product_discovery
+from app.llm.base import ChatMessage, ChatModel, ChatResult, ModelError, ToolChatResult
+from app.services import company_answer, model_assistant, product_answer, product_discovery
 
 
 @dataclass
@@ -34,6 +34,24 @@ class ObservedModel:
             result = await self.model.chat(messages)
             row.update(model=result.model, prompt_tokens=result.prompt_tokens,
                        output_tokens=result.output_tokens)
+            return result
+        except Exception as exc:
+            row["error_type"] = type(exc).__name__
+            raise
+        finally:
+            row["total_ms"] = round((perf_counter() - started) * 1000, 1)
+
+    async def chat_with_tools(self, messages: list[dict], tools: list[dict]) -> ToolChatResult:
+        started = perf_counter()
+        row = {"message_count": len(messages), "context_characters": sum(len(message["content"]) for message in messages),
+               "tool_choice": True, "prompt_tokens": None, "output_tokens": None}
+        self.observation.model_calls.append(row)
+        try:
+            result = await self.model.chat_with_tools(messages, tools)
+            if not isinstance(result, ToolChatResult):
+                raise ModelError("Invalid tool choice result")
+            row.update(model=result.model, prompt_tokens=result.prompt_tokens,
+                       output_tokens=result.output_tokens, requested_tools=[call.name for call in result.tool_calls])
             return result
         except Exception as exc:
             row["error_type"] = type(exc).__name__
@@ -92,6 +110,7 @@ def observe(model: ChatModel) -> Iterator[Observation]:
         for module in (product_answer, product_discovery):
             stack.enter_context(patch.object(module, "execute_tool", tool_wrapper(module.execute_tool)))
         for module, name, authorize_name in (
+            (model_assistant, "search_for_role", "select_authorized_points"),
             (company_answer, "search_for_role", "select_authorized_points"),
             (product_discovery, "fetch_product_points", "authorized_points"),
         ):

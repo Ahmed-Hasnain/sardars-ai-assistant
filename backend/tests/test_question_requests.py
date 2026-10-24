@@ -17,9 +17,7 @@ from app.auth.security import token_hash
 from app.db.base import Base
 from app.db.models import LoginSession, User
 from app.db.session import get_db
-from app.llm.base import ChatResult
 from app.main import app
-from app.rag.answer_seed import CitedAnswer, FALLBACK
 from app.schemas.chat import ChatResponse
 
 
@@ -48,13 +46,8 @@ def runtime(monkeypatch):
         ))
     handlers = {}
     for name, result in {
-        "app.api.chat.chat_model.chat": ChatResult("Hello", "test", None, None, None),
-        "app.api.chat.answer_company": CitedAnswer(FALLBACK, []),
-        "app.api.ask.answer_company": CitedAnswer(FALLBACK, []),
-        "app.api.chat.answer_product": ChatResponse(answer="Product", route="product", model=None),
-        "app.api.chat.answer_product_discovery": ChatResponse(
-            answer="Products", route="product_search", model=None,
-        ),
+        "app.api.chat.answer_model_first": ChatResponse(answer="Hello", route="general", model="test"),
+        "app.api.ask.answer_model_first": ChatResponse(answer="Hello", route="general", model="test"),
     }.items():
         handlers[name] = AsyncMock(return_value=result)
         monkeypatch.setattr(name, handlers[name])
@@ -135,11 +128,10 @@ def test_full_character_budget_accepts_escaped_unicode_and_followup_handles(runt
     body = json.dumps({"message": message, "product_handles": handles}, ensure_ascii=True).encode()
     response = client.post(endpoint, headers={**headers, "Content-Type": "application/json"}, content=body)
     assert response.status_code == 200
-    handler = handlers["app.api.chat.answer_product_discovery" if endpoint.endswith("chat")
-                       else "app.api.ask.answer_company"]
+    handler = handlers["app.api.chat.answer_model_first" if endpoint.endswith("chat")
+                       else "app.api.ask.answer_model_first"]
     assert handler.await_args.args[0] == message
-    if endpoint.endswith("chat"):
-        assert handler.await_args.args[3] == handles
+    assert handler.await_args.kwargs["product_handles"] == handles
 
 
 async def asgi_post(endpoint, headers, receive):

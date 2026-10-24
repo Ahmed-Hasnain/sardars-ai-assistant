@@ -15,7 +15,7 @@ from app.auth.reset_password import main as reset_password_main
 from app.db.base import Base
 from app.db.models import LoginSession, SourceRegistration, User
 from app.db.session import get_db
-from app.llm.base import ChatResult
+from app.llm.base import ChatResult, ToolChatResult
 from app.main import app
 
 
@@ -247,17 +247,19 @@ def test_ask_checks_auth_before_retrieval_and_returns_citations(local_app) -> No
     client, sessions = local_app
     _create_user(sessions, "staff@example.com")
     _register_brand_source(sessions)
-    with patch("app.services.company_answer.search_for_role") as search:
+    with patch("app.services.model_assistant.search_for_role") as search:
         assert client.post("/api/v1/ask", json={"message": "Which brands?"}).status_code == 401
         search.assert_not_called()
 
     token = _login(client, "staff@example.com")
     with (
-        patch("app.services.company_answer.search_for_role", return_value=[_brand_point()]),
-        patch("app.api.ask.answer_model.chat", new_callable=AsyncMock) as chat,
+        patch("app.services.model_assistant.search_for_role", return_value=[_brand_point()]),
+        patch("app.api.ask.answer_model.chat_with_tools", new_callable=AsyncMock) as chat,
+        patch("app.api.ask.answer_model.chat", new_callable=AsyncMock,
+              return_value=ChatResult("Sardars mentions Bongio, Scarabeo and Grohe. [1]", "test", None, None, None)),
     ):
-        chat.return_value = ChatResult(
-            "Sardars mentions Bongio, Scarabeo and Grohe. [1]", "test", None, None, None
+        chat.return_value = ToolChatResult(
+            "Sardars mentions Bongio, Scarabeo and Grohe. [1]", "test", (), None, None, None
         )
         response = client.post(
             "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
@@ -277,15 +279,18 @@ def test_ask_ignores_unregistered_or_disabled_source(local_app) -> None:
     _create_user(sessions, "staff@example.com")
     token = _login(client, "staff@example.com")
     with (
-        patch("app.services.company_answer.search_for_role", return_value=[_brand_point()]),
-        patch("app.api.ask.answer_model.chat", new_callable=AsyncMock) as chat,
+        patch("app.services.model_assistant.search_for_role", return_value=[_brand_point()]),
+        patch("app.api.ask.answer_model.chat_with_tools", new_callable=AsyncMock) as chat,
+        patch("app.api.ask.answer_model.chat", new_callable=AsyncMock,
+              return_value=ChatResult("I cannot verify a company brand from available sources.", "test", None, None, None)),
     ):
+        chat.return_value = ToolChatResult("I cannot verify a company brand from available sources.", "test", (), None, None, None)
         response = client.post(
             "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
         )
         assert response.status_code == 200
         assert response.json()["sources"] == []
-        chat.assert_not_called()
+        chat.assert_awaited_once()
 
         _register_brand_source(sessions, is_active=False)
         response = client.post(
@@ -293,17 +298,22 @@ def test_ask_ignores_unregistered_or_disabled_source(local_app) -> None:
         )
         assert response.status_code == 200
         assert response.json()["sources"] == []
-        chat.assert_not_called()
+        assert chat.await_count == 2
 
 
-def test_chat_requires_auth_and_ask_hides_retrieval_failures(local_app) -> None:
+def test_chat_requires_auth_and_ask_continues_after_retrieval_failure(local_app) -> None:
     client, sessions = local_app
     _create_user(sessions, "staff@example.com")
     assert client.post("/api/v1/chat", json={"message": "Hello"}).status_code == 401
     token = _login(client, "staff@example.com")
-    with patch("app.services.company_answer.search_for_role", side_effect=httpx.ConnectError("down")):
+    with patch("app.services.model_assistant.search_for_role", side_effect=httpx.ConnectError("down")), \
+         patch("app.api.ask.answer_model.chat_with_tools", new_callable=AsyncMock,
+               return_value=ToolChatResult("READY", "test", (), None, None, None)), \
+         patch("app.api.ask.answer_model.chat", new_callable=AsyncMock,
+               return_value=ChatResult("I cannot verify the brand list right now.", "test", None, None, None)):
         response = client.post(
             "/api/v1/ask", json={"message": "Which brands?"}, headers=_headers(token)
         )
-    assert response.status_code == 503
-    assert response.json() == {"detail": "Answer service unavailable"}
+    assert response.status_code == 200
+    assert response.json()["sources"] == []
+    assert "cannot verify" in response.json()["answer"]
