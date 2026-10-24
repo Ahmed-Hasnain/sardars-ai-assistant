@@ -17,11 +17,24 @@ from app.evaluation.observe_chat import Observation
 from app.evaluation.run_chat import (
     CASES_PATH, ChatCase, check_response, evaluate, load_cases, run, summarize,
 )
-from app.llm.base import ChatResult, ModelError
+from app.llm.base import ChatResult, ModelError, ToolChatResult
 from app.rag.answer_seed import FALLBACK
 from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatResponse
-from app.services import company_answer, product_discovery
+from app.services import model_assistant, product_discovery
+
+
+def _model():
+    model = AsyncMock()
+    model.chat.return_value = ChatResult("I cannot verify that detail from available sources.", "fixture", 10, 5, 20)
+    model.chat_with_tools.return_value = ToolChatResult("", "fixture", (), 10, 0, 20)
+    return model
+
+
+@pytest.fixture(autouse=True)
+def no_live_index(monkeypatch):
+    monkeypatch.setattr(model_assistant, "search_for_role", lambda *_: [])
+    monkeypatch.setattr(product_discovery, "fetch_product_points", lambda *_: [])
 
 
 @pytest.fixture
@@ -72,13 +85,13 @@ def test_duplicate_oversized_and_conflicting_cases_are_rejected(tmp_path):
 
 
 def test_live_tool_is_observed_and_facts_are_checked_independently(sessions):
-    model = AsyncMock()
+    model = _model()
     row = asyncio.run(evaluate(case(), model, sessions))
     assert row["passed"]
     assert row["checks"]["exact_facts"] is True
     assert [call["name"] for call in row["observation"]["tools"]] == ["get_product_details"]
-    assert row["observation"]["model_calls"] == []
-    model.chat.assert_not_called()
+    assert len(row["observation"]["model_calls"]) == 2
+    model.chat.assert_awaited_once()
     response = ChatResponse.model_validate(row["response"])
     with sessions() as db:
         for wrong in ("12", "1250", "999"):
@@ -94,14 +107,14 @@ def test_live_tool_is_observed_and_facts_are_checked_independently(sessions):
 
 def test_expected_tool_is_not_inferred_from_a_matching_route(sessions):
     c = case(expected_tools=["search_products"])
-    row = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    row = asyncio.run(evaluate(c, _model(), sessions))
     assert not row["passed"] and row["checks"]["routing"] is True
     assert row["checks"]["tool_selection"] is False
 
 
 def test_stock_checker_catches_wrong_quantity_and_tracks_zero(sessions):
     c = case(expected_stock_sku="TEST-1")
-    row = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    row = asyncio.run(evaluate(c, _model(), sessions))
     assert row["passed"] and row["checks"]["stock_facts"] is True
     response = ChatResponse.model_validate(row["response"])
     forged = response.model_copy(update={"answer": response.answer.replace("stock 6 units", "stock 9 units")})
@@ -109,26 +122,27 @@ def test_stock_checker_catches_wrong_quantity_and_tracks_zero(sessions):
         assert check_response(c, forged, Observation(), db)["stock_facts"] is False
     with sessions.begin() as db:
         db.query(Product).filter(Product.variant_sku == "TEST-1").update({"variant_inventory_qty": 0})
-    zero = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    zero = asyncio.run(evaluate(c, _model(), sessions))
     assert zero["passed"] and "database stock 0 units" in zero["response"]["answer"]
 
 
 def test_general_answer_records_context_counts_without_prompt_text(sessions):
-    model = AsyncMock()
+    model = _model()
     model.chat.return_value = ChatResult("It controls temperature.", "fixture", 12, 4, 10)
     c = case(category="technical", question="What is a mixer?", expected_route="general",
              expected_tools=[], expected_sku=None, answer_contains=["temperature"])
     original = chat.chat_model
     row = asyncio.run(evaluate(c, model, sessions))
     assert row["passed"] and chat.chat_model is original
-    metrics = row["observation"]["model_calls"][0]
+    assert row["observation"]["model_calls"][0]["tool_choice"] is True
+    metrics = row["observation"]["model_calls"][-1]
     assert metrics["prompt_tokens"] == 12 and metrics["output_tokens"] == 4
     assert metrics["context_characters"] > len(c.question)
     assert "content" not in metrics and "messages" not in metrics
 
 
 def test_general_answer_requires_bathroom_context_not_just_temperature(sessions):
-    model = AsyncMock()
+    model = _model()
     model.chat.return_value = ChatResult("A food mixer controls the temperature of ingredients.", "fixture", 12, 10, 15)
     c = case(category="technical", question="What is a bathroom tap mixer?", expected_route="general",
              expected_tools=[], expected_sku=None, answer_contains=["water", "temperature"],
@@ -144,7 +158,7 @@ def test_general_answer_requires_bathroom_context_not_just_temperature(sessions)
 
 
 def test_model_failure_is_failed_and_private_error_is_not_recorded(sessions):
-    model = AsyncMock()
+    model = _model()
     model.chat.side_effect = ModelError("PRIVATE_ERROR")
     c = case(question="What is a mixer?", expected_route="general", expected_tools=[], expected_sku=None)
     row = asyncio.run(evaluate(c, model, sessions))
@@ -155,10 +169,10 @@ def test_model_failure_is_failed_and_private_error_is_not_recorded(sessions):
 def test_retrieval_failure_does_not_pass_a_missing_policy(sessions, monkeypatch):
     def unavailable(*args):
         raise httpx.ConnectError("PRIVATE_ERROR")
-    monkeypatch.setattr(company_answer, "search_for_role", unavailable)
+    monkeypatch.setattr(model_assistant, "search_for_role", unavailable)
     c = case(question="What is Sardars' return policy?", expected_route="company",
              expected_tools=[], expected_sku=None, abstain=True)
-    row = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    row = asyncio.run(evaluate(c, _model(), sessions))
     assert not row["passed"] and row["checks"]["service"] is False
     assert "PRIVATE_ERROR" not in str(row)
 
@@ -169,7 +183,7 @@ def test_swallowed_description_outage_is_reported_separately(sessions, monkeypat
     monkeypatch.setattr(product_discovery, "fetch_product_points", unavailable)
     c = case(question="Show me basin mixers", expected_route="product_search",
              expected_tools=["search_products"], expected_sku=None, min_products=1)
-    row = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    row = asyncio.run(evaluate(c, _model(), sessions))
     assert not row["passed"]
     assert row["checks"]["exact_facts"] is True and row["checks"]["service"] is False
     assert "PRIVATE_ERROR" not in str(row)
@@ -183,7 +197,7 @@ def test_continuation_variant_uses_active_parent_and_checks_rendered_values(sess
                        variant_price=100, status=None, source_row_kind="variant", visibility="staff"))
     c = case(question="Compare SKU TEST-1 and SKU TEST-2", expected_route="product_search",
              expected_tools=["search_products"], expected_sku=None, min_products=2)
-    row = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    row = asyncio.run(evaluate(c, _model(), sessions))
     assert row["passed"] and row["checks"]["exact_facts"] is True
     response = ChatResponse.model_validate(row["response"])
     forged = response.model_copy(update={"answer": response.answer.replace("price 100", "price 999")})
@@ -196,7 +210,7 @@ def test_combined_answer_needs_a_description_for_its_actual_product(sessions, mo
     c = case(question="Show me basin mixers under 1000", expected_route="product_search",
              expected_tools=["search_products"], expected_sku=None, min_products=1,
              min_citations=1, price_under=1000)
-    row = asyncio.run(evaluate(c, AsyncMock(), sessions))
+    row = asyncio.run(evaluate(c, _model(), sessions))
     assert row["checks"]["description_join"] is False and not row["passed"]
     assert row["checks"]["price_filter"] is True
 
@@ -216,7 +230,7 @@ def test_forged_citations_and_source_misses_are_distinct(sessions):
 def test_disposable_controls_never_open_project_sessions(c):
     def forbidden():
         raise AssertionError("Live database must not be used by controls")
-    row = asyncio.run(evaluate(c, AsyncMock(), forbidden))
+    row = asyncio.run(evaluate(c, _model(), forbidden))
     assert row["passed"] and row["mode"] == "synthetic_control"
 
 

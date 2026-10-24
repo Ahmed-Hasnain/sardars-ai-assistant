@@ -60,6 +60,24 @@ def invoke(db, question, role="staff", context=None, prefer_descriptions=False):
     }), db, SimpleNamespace(role=role, is_active=True))
 
 
+def test_catalog_category_tool_checks_role_and_active_rows(catalog):
+    with catalog.begin() as db:
+        for row, label in ((1, "Sanitary Fittings"), (3, "Tiles"),
+                           (5, "Admin Only"), (6, "Archived")):
+            db.get(Product, row).meta_custom_category = label
+    call = ToolInvocation(name="list_product_categories", arguments={})
+    with catalog() as db:
+        staff = execute_tool(call, db, SimpleNamespace(role="staff", is_active=True))
+        admin = execute_tool(call, db, SimpleNamespace(role="admin", is_active=True))
+        denied = execute_tool(call, db, SimpleNamespace(role="staff", is_active=False))
+        invalid = execute_tool(ToolInvocation(name=call.name, arguments={"sql": "SELECT *"}),
+                               db, SimpleNamespace(role="staff", is_active=True))
+    assert staff.ok and set(staff.data.categories) == {"Sanitary Fittings", "Tiles"}
+    assert admin.ok and set(admin.data.categories) == {"Sanitary Fittings", "Tiles", "Admin Only"}
+    assert denied.error.code == "permission_denied"
+    assert invalid.error.code == "invalid_arguments"
+
+
 def test_forged_search_result_cannot_render_instructions(catalog, monkeypatch):
     with catalog() as db:
         normal = invoke(db, "Recommend black basin mixers under 1000")
@@ -93,6 +111,21 @@ def test_filter_requires_same_variant_finish_and_price_with_role_and_status(cata
         assert invoke(db, "Recommend black wall mounted basin mixers between 900 and 1000").data.matches[0].price == "900"
         assert invoke(db, "Recommend black wall mounted basin mixers between 100000000000 and 200000000000").data.matches == []
         assert invoke(db, "Recommend shower mixers under 1000").data.matches[0].handle == "black-shower-mixer"
+
+
+def test_request_for_product_page_description_does_not_filter_out_catalog_match(catalog):
+    with catalog() as db:
+        result = invoke(db, "Which black wall mounted basin mixers are under 1000, and what does their product page say?")
+    assert result.ok
+    assert [(match.handle, match.sku) for match in result.data.matches] == [
+        ("black-basin-mixer", "BASIN-BLACK")]
+
+
+def test_point_me_to_is_a_browse_phrase_not_a_catalog_filter(catalog):
+    with catalog() as db:
+        result = invoke(db, "Point me to basin mixers")
+    assert result.ok and result.data.matches
+    assert all("basin" in match.handle for match in result.data.matches)
 
 
 def test_stock_filter_uses_matching_visible_variant_and_rendered_quantity(catalog, monkeypatch):

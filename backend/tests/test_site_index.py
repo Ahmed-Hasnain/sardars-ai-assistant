@@ -16,7 +16,7 @@ def _settings() -> Settings:
     return Settings(
         _env_file=None, db_user="test", db_name="test", db_password="test",
         ollama_base_url="http://embedding.local:11434", qdrant_base_url="http://vectors.local:6333",
-        embedding_batch_size=EMBEDDING_BATCH_SIZE,
+        embedding_batch_size=EMBEDDING_BATCH_SIZE, import_timeout_seconds=300,
     )
 
 

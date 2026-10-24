@@ -10,4 +10,5 @@ ensure_model() {
 }
 
 ensure_model "$SARDARS_OLLAMA_MODEL"
+ensure_model "${SARDARS_PROTOTYPE_CHAT_MODEL:-qwen3:0.6b}"
 ensure_model qwen3-embedding:0.6b

@@ -33,12 +33,20 @@ def rerank(question: str, points: list[dict], limit: int) -> list[dict]:
             return (0, -index)
         title = payload.get("title")
         body = payload.get("text")
+        body_text = body[:1500] if isinstance(body, str) else ""
         title_terms = _terms(title[:500]) if isinstance(title, str) else set()
-        body_terms = _terms(body[:1500]) if isinstance(body, str) else set()
+        body_terms = _terms(body_text)
         title_hits = len(query & title_terms)
         body_hits = len(query & body_terms)
+        # A compact answer-bearing sentence is stronger than scattered words
+        # in a product's long SEO copy, especially for article questions.
+        coherent = any(
+            query.issubset(_terms(sentence))
+            for sentence in re.split(r"(?<=[.!?])\s+", body_text)
+            if len(sentence) <= 260
+        )
         # Keep semantic rank relevant when keyword evidence is weak.
-        return (3 * title_hits + body_hits + 2 / (index + 1), -index)
+        return (3 * title_hits + body_hits + 7 * coherent + 2 / (index + 1), -index)
 
     ranked = sorted(enumerate(points), key=score, reverse=True)
     return [point for _, point in ranked[:limit]]

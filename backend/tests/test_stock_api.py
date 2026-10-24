@@ -1,7 +1,7 @@
 """Authenticated stock reads, saved answers and fresh follow-ups in isolated SQL."""
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 import pytest
@@ -15,6 +15,7 @@ from app.db.models import User
 from app.db.products import Product
 from app.db.session import get_db
 from app.main import app
+from app.llm.base import ChatResult, ToolChatResult
 
 PASSWORD = "correct horse battery staple"
 
@@ -66,13 +67,16 @@ def test_authenticated_stream_and_history_reread_stock_after_change(runtime):
     client, sessions = runtime
     assert client.post("/api/v1/chat", json={"message": "Is SKU STOCK-1 in stock?"}).status_code == 401
     staff = login(client, "stock-staff@example.test")
-    with patch("app.api.chat.chat_model.chat", side_effect=AssertionError("model must not decide stock")):
+    with patch("app.api.chat.chat_model.chat_with_tools", new_callable=AsyncMock,
+               return_value=ToolChatResult("READY", "fixture", (), None, None, None)), \
+         patch("app.api.chat.chat_model.chat", new_callable=AsyncMock,
+               return_value=ChatResult("Here are the database results.", "fixture", None, None, None)):
         first = client.post("/api/v1/chat/stream", headers=staff,
                             json={"message": "Is SKU STOCK-1 in stock?"})
     assert first.status_code == 200
     complete = next(json.loads(block.split("data: ", 1)[1]) for block in first.text.split("\n\n")
                     if block.startswith("event: complete\n"))
-    assert complete["route"] == "product" and complete["model"] is None
+    assert complete["route"] == "product" and complete["model"] == "fixture"
     assert "database stock 7 units" in complete["answer"]
     assert complete["product_source"]["current_stock_verified"] is True
     assert complete["product_source"]["external_sync_verified"] is False
@@ -80,8 +84,12 @@ def test_authenticated_stream_and_history_reread_stock_after_change(runtime):
 
     with sessions.begin() as db:
         db.query(Product).filter(Product.variant_sku == "STOCK-1").update({"variant_inventory_qty": 0})
-    second = client.post("/api/v1/chat", headers=staff,
-                         json={"message": "What is the stock for SKU STOCK-1?", "conversation_id": conversation})
+    with patch("app.api.chat.chat_model.chat_with_tools", new_callable=AsyncMock,
+               return_value=ToolChatResult("READY", "fixture", (), None, None, None)), \
+         patch("app.api.chat.chat_model.chat", new_callable=AsyncMock,
+               return_value=ChatResult("Here are the updated database results.", "fixture", None, None, None)):
+        second = client.post("/api/v1/chat", headers=staff,
+                             json={"message": "What is the stock for SKU STOCK-1?", "conversation_id": conversation})
     assert second.status_code == 200 and second.json()["conversation_id"] == conversation
     assert "database stock 0 units" in second.json()["answer"]
     assert "database stock 7 units" not in second.json()["answer"]

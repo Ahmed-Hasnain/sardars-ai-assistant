@@ -13,10 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.db.models import User
 from app.services.product_lookup import AmbiguousSku, TooManyVariants, get_product_details
-from app.services.product_search import search_products
+from app.services.product_search import list_product_categories, search_products
 from app.services.source_status import get_source_status
 from app.tools.schemas import (
-    ProductArguments, ProductSearchArguments, SourceStatusArguments, ToolError, ToolFailure,
+    ProductArguments, ProductCategoryArguments, ProductSearchArguments, SourceStatusArguments, ToolError, ToolFailure,
     ToolInvocation, ToolResult, ToolSuccess,
 )
 
@@ -51,6 +51,11 @@ TOOLS: Mapping[str, ReadTool] = MappingProxyType({
         "Returns bounded exact prices, SKUs and variant stock quantities. Currency and external synchronization remain unverified.",
         frozenset({"staff", "admin"}),
     ),
+    "list_product_categories": ReadTool(
+        "list_product_categories",
+        "List bounded category labels from visible active PostgreSQL catalog products.",
+        frozenset({"staff", "admin"}),
+    ),
 })
 
 
@@ -78,6 +83,7 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
             "get_source_status": SourceStatusArguments,
             "get_product_details": ProductArguments,
             "search_products": ProductSearchArguments,
+            "list_product_categories": ProductCategoryArguments,
         }[call.name]
         arguments = argument_type.model_validate(call.arguments)
     except ValidationError:
@@ -89,8 +95,11 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
         elif call.name == "get_product_details":
             data = get_product_details(db, user.role, arguments)
             missing = "product_not_found"
-        else:
+        elif call.name == "search_products":
             data = search_products(db, user.role, arguments)
+            missing = "product_not_found"
+        else:
+            data = list_product_categories(db, user.role)
             missing = "product_not_found"
         if data is None:
             return _failure(call.name, missing, "Source not found" if missing == "source_not_found" else "Product not found")

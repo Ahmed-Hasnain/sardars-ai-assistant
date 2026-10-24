@@ -118,6 +118,18 @@ class ProductSearchResults(StrictModel):
     external_sync_verified: Literal[False] = False
 
 
+class ProductCategoryArguments(StrictModel):
+    pass
+
+
+class ProductCategoryResults(StrictModel):
+    authority: Literal["developer_authorized_products_table"] = "developer_authorized_products_table"
+    observed_at: AwareDatetime
+    categories: list[str] = Field(max_length=20)
+    more_categories: bool = False
+    source_file_sha256: list[str] = Field(max_length=20)
+
+
 class ToolError(StrictModel):
     code: Literal[
         "unknown_tool", "permission_denied", "invalid_arguments", "source_not_found",
@@ -130,7 +142,7 @@ class ToolError(StrictModel):
 class ToolSuccess(StrictModel):
     tool: str = Field(max_length=64)
     ok: Literal[True] = True
-    data: SourceStatus | ProductDetails | ProductCandidates | ProductSearchResults
+    data: SourceStatus | ProductDetails | ProductCandidates | ProductSearchResults | ProductCategoryResults
 
 
 class ToolFailure(StrictModel):

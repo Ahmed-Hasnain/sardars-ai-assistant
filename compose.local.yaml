@@ -6,6 +6,7 @@ x-app-env: &app-env
   SARDARS_DB_PORT: "5432"
   SARDARS_QDRANT_BASE_URL: http://qdrant:6333
   SARDARS_OLLAMA_BASE_URL: http://ollama:11434
+  SARDARS_PROTOTYPE_CHAT_MODEL: ${SARDARS_PROTOTYPE_CHAT_MODEL:-qwen3:0.6b}
   SARDARS_INGESTION_STORAGE_DIR: /app/data/uploads
   SARDARS_INGESTION_RUNNER: worker
 
@@ -63,6 +64,7 @@ services:
     environment:
       OLLAMA_HOST: http://ollama:11434
       SARDARS_OLLAMA_MODEL: ${SARDARS_OLLAMA_MODEL:-qwen3:0.6b}
+      SARDARS_PROTOTYPE_CHAT_MODEL: ${SARDARS_PROTOTYPE_CHAT_MODEL:-qwen3:0.6b}
     depends_on:
       ollama:
         condition: service_healthy

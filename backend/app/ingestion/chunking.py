@@ -44,9 +44,42 @@ def _word_groups(text: str) -> list[list[str]]:
     return groups
 
 
-def chunk_record(record: dict) -> list[dict]:
+def _structure_groups(text: str) -> list[list[str]]:
+    """Shadow policy: preserve short sections; overlap only within long sections.
+
+    FAQ pairs retain their existing, separately bounded treatment. This policy
+    is deliberately opt-in until the saved-corpus comparison justifies reindexing.
+    """
+    blocks = [block for block in re.split(r"\n\s*\n", text.strip()) if block.strip()]
+    groups: list[list[str]] = []
+    ordinary: list[str] = []
+
+    def flush() -> None:
+        if ordinary:
+            groups.append(ordinary.copy())
+            ordinary.clear()
+
+    for block in blocks:
+        words = block.split()
+        if FAQ_BLOCK.match(block) and len(words) <= MAX_FAQ_WORDS:
+            flush()
+            groups.append(words)
+            continue
+        if len(words) > MAX_WORDS:
+            flush()
+            groups.extend(_sliding_groups(words))
+            continue
+        if ordinary and len(ordinary) + len(words) > MAX_WORDS:
+            flush()
+        ordinary.extend(words)
+    flush()
+    return groups
+
+
+def chunk_record(record: dict, *, structure_aware: bool = False) -> list[dict]:
     chunks = []
-    for index, chunk_words in enumerate(_word_groups(record["text"])):
+    groups = _structure_groups(record["text"]) if structure_aware else _word_groups(record["text"])
+    for index, chunk_words in enumerate(groups):
         chunk = {
             "id": str(uuid5(NAMESPACE_URL, f"{record['source_id']}:{index}")),
             "source_id": record["source_id"],

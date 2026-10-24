@@ -19,6 +19,7 @@ from app.db.models import IngestionJob, SourceRegistration, User
 from app.db.session import get_db
 from app.ingestion.job_runner import JobFailed, run_job
 from app.ingestion.site_index import WebsiteIndexer
+from app.llm.base import ChatResult, ToolChatResult
 from app.main import app
 from app.services import ingestion as service
 from test_sync_jobs import Services
@@ -104,7 +105,11 @@ def test_file_upload_provenance_citation_download_and_job_privacy(runtime):
     assert job.json()["status"] == "completed"
     assert "storage_key" not in job.text and "Testbrand" not in job.text and "run_token" not in job.text
     assert client.get("/api/v1/ingestion/jobs/" + result["job_id"], headers=headers["other"]).status_code == 404
-    with patch("app.services.company_answer.search_for_role", return_value=list(services.points.values())):
+    with patch("app.services.model_assistant.search_for_role", return_value=list(services.points.values())), \
+         patch("app.api.ask.answer_model.chat_with_tools", new_callable=AsyncMock,
+               return_value=ToolChatResult("READY", "fixture", (), None, None, None)), \
+         patch("app.api.ask.answer_model.chat", new_callable=AsyncMock,
+               return_value=ChatResult("Sardars mentions Testbrand. [1]", "fixture", None, None, None)):
         answer = client.post("/api/v1/ask", headers=headers["staff"], json={"message": "What is Testbrand?"})
     assert answer.status_code == 200 and "Testbrand" in answer.json()["answer"]
     assert answer.json()["sources"][0]["url"] == url
@@ -119,13 +124,23 @@ def test_admin_only_content_never_reaches_staff_answers_or_metadata(runtime):
     assert client.get("/api/v1/ingestion/sources", headers=headers["staff"]).json() == []
     assert client.get("/api/v1/ingestion/jobs/" + result["job_id"], headers=headers["staff"]).status_code == 404
     assert client.delete("/api/v1/ingestion/sources/" + identity, headers=headers["staff"]).status_code == 404
-    with (patch("app.services.company_answer.search_for_role", return_value=list(services.points.values())),
-          patch("app.api.ask.answer_model.chat", new_callable=AsyncMock) as model):
+    async def answer_from_context(messages):
+        has_brand = "Vaultbrand" in messages[-2]["content"]
+        return ChatResult(
+            "Sardars mentions Vaultbrand. [1]" if has_brand else "I cannot verify that from available sources.",
+            "fixture", None, None, None,
+        )
+
+    with (patch("app.services.model_assistant.search_for_role", return_value=list(services.points.values())),
+          patch("app.api.ask.answer_model.chat_with_tools", new_callable=AsyncMock,
+                return_value=ToolChatResult("READY", "fixture", (), None, None, None)),
+          patch("app.api.ask.answer_model.chat", new_callable=AsyncMock,
+                side_effect=answer_from_context) as model):
         denied = client.post("/api/v1/ask", headers=headers["staff"], json={"message": "What is Vaultbrand?"})
-        model.assert_not_called()
         assert denied.json()["sources"] == [] and "Vaultbrand" not in denied.json()["answer"]
         permitted = client.post("/api/v1/ask", headers=headers["admin"], json={"message": "What is Vaultbrand?"})
         assert "Vaultbrand" in permitted.json()["answer"] and permitted.json()["sources"]
+        assert model.await_count == 2
 
 
 @pytest.mark.parametrize("visibility", ["public", "admin"])

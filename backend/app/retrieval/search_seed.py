@@ -7,6 +7,7 @@ from app.api.answer_deadlines import remaining_timeout
 from app.core.config import Settings
 from app.retrieval.seed_config import COLLECTION, DIMENSIONS, MODEL
 from app.retrieval.authorization import ALLOWED_VISIBILITIES
+from app.retrieval.rerank import STOP_WORDS, WORD
 
 
 COMPANY_OVERVIEW = re.compile(
@@ -19,6 +20,20 @@ COMPANY_IDENTITY_QUESTION = re.compile(
 )
 PRODUCT_DISCOVERY_QUESTION = re.compile(r"\b(?:what|which)\b.{0,100}\bproducts?\b", re.I)
 SEARCH_POOL_LIMIT = 32
+LEXICAL_POOL_LIMIT = 16
+LEXICAL_FILLER = STOP_WORDS | {
+    "business", "company", "does", "mention", "mentions", "product", "products",
+    "sardar", "says", "size", "they", "your",
+}
+
+
+def _lexical_query(question: str) -> str | None:
+    """Use actual query tokens; Qdrant's text match does not stem plurals."""
+    terms = []
+    for term in WORD.findall(question.lower()):
+        if term not in LEXICAL_FILLER and term not in terms:
+            terms.append(term)
+    return " ".join(terms[:6]) if 2 <= len(terms) <= 6 else None
 
 
 def is_company_overview_question(question: str) -> bool:
@@ -101,11 +116,29 @@ def _query(question: str, conditions: list[dict], visibility: set[str] | None = 
         points = response.json()["result"]["points"]
         if not isinstance(points, list) or len(points) > SEARCH_POOL_LIMIT - len(preferred):
             raise ValueError("Unexpected retrieval candidate count")
+        lexical = []
+        phrase = _lexical_query(question)
+        if phrase:
+            response = client.post(
+                f"{settings.qdrant_base_url.rstrip('/')}/collections/{COLLECTION}/points/scroll",
+                json={
+                    "filter": {**point_filter, "must": [*point_filter["must"],
+                                {"key": "text", "match": {"text": phrase}}]},
+                    "limit": LEXICAL_POOL_LIMIT,
+                    "with_payload": True,
+                    "with_vector": False,
+                },
+                timeout=remaining_timeout(min(settings.ollama_timeout_seconds, 10.0)),
+            )
+            response.raise_for_status()
+            lexical = response.json()["result"]["points"]
+            if not isinstance(lexical, list) or len(lexical) > LEXICAL_POOL_LIMIT:
+                raise ValueError("Unexpected lexical retrieval candidate count")
     result = []
     seen = set()
     # Return the role-prefiltered pool. The caller must recheck every point
     # against PostgreSQL, then rank/select at most eight for answer evidence.
-    for point in preferred + points:
+    for point in preferred + points + lexical:
         if not isinstance(point, dict) or not isinstance(point.get("id"), (str, int)):
             raise ValueError("Unexpected retrieval point")
         if point["id"] not in seen:
@@ -206,7 +239,9 @@ def main() -> None:
     print(f"{mode} SEARCH — {len(points)} matching chunks")
     for rank, point in enumerate(points, start=1):
         payload = point["payload"]
-        print(f"\n{rank}. {payload['title']} | score: {point['score']:.3f}")
+        score = point.get("score")
+        score_text = f"{score:.3f}" if isinstance(score, (int, float)) else "lexical"
+        print(f"\n{rank}. {payload['title']} | score: {score_text}")
         print(f"Source: {payload['url']}")
         print(f"Review: {payload['review_status']}")
         print(f"Text: {payload['text']}")
