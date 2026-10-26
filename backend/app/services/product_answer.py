@@ -1,6 +1,10 @@
 """Reliable, application-selected product tool path for staff chat."""
 
+import asyncio
 import re
+
+import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -8,7 +12,11 @@ from starlette.concurrency import run_in_threadpool
 from app.db.models import User
 from app.rag.text_safety import contains_prompt_instruction
 from app.rag.claim_safety import unsafe_catalog_display
+from app.retrieval.authorization import authorized_points
+from app.retrieval.search_seed import fetch_product_points
 from app.schemas.chat import ChatResponse, ProductSource
+from app.services.product_discovery import _description
+from app.services.product_search import PRODUCT_URL
 from app.tools.registry import execute_tool
 from app.tools.schemas import ProductCandidates, ProductDetails, ToolInvocation, ToolSuccess
 
@@ -16,12 +24,18 @@ STOCK_INTENT = re.compile(r"\b(?:stock|inventory|availability|available|in.stock
 STOCK_PROMISE = re.compile(r"\b(?:guarantee|reserve|promise|definitely)\b", re.I)
 PRODUCT_INTENT = re.compile(r"\b(?:sku|price|prices|pricing|variant|variants|product details|product handle|cost|how much|stock|inventory|availability|available)\b", re.I)
 NO_PRODUCT = "I couldn't find a matching product in the current database. Provide a SKU, product handle, or more of the product name."
+FULL_DETAILS = re.compile(r"\b(?:complete|full|description|describe|more information)\b|about this product", re.I)
+CATEGORY_FIELD = re.compile(r"\b(?:category|type)\b", re.I)
 
 
 def _render_product(data: ProductDetails) -> str:
     lines = [f"{data.title or data.handle} (handle: {data.handle})"]
     if data.vendor:
         lines.append(f"Vendor: {data.vendor}")
+    if data.category:
+        lines.append(f"Catalog category: {data.category}")
+    if data.product_type and data.product_type.casefold() != "simple":
+        lines.append(f"Catalog type: {data.product_type}")
     lines.append("Prices, SKUs and variant stock quantities in the Sardars product database:")
     for variant in data.variants:
         options = ", ".join(
@@ -50,10 +64,14 @@ def _render_candidates(data: ProductCandidates) -> str:
     return "\n".join(lines)
 
 
-async def answer_product(question: str, user: User, db: Session) -> ChatResponse:
+async def answer_product(
+    question: str, user: User, db: Session, *, identifier: str | None = None,
+) -> ChatResponse:
     # Price/SKU questions are routed here by application code. A small model's
     # decision to emit a tool call is not needed for exact database facts.
-    call = ToolInvocation(name="get_product_details", arguments={"question": question})
+    call = ToolInvocation(name="get_product_details", arguments={
+        "identifier": identifier,
+    } if identifier else {"question": question})
     result = await run_in_threadpool(execute_tool, call, db, user)
     if not isinstance(result, ToolSuccess):
         if result.error.code == "tool_timeout":
@@ -77,7 +95,8 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
     if not isinstance(result.data, ProductDetails):
         return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
     data = result.data
-    display_fields = [data.title or "", data.vendor or "", data.handle]
+    display_fields = [data.title or "", data.vendor or "", data.category or "",
+                      data.product_type or "", data.handle]
     for variant in data.variants:
         display_fields.extend(value or "" for value in (
             variant.sku, variant.option1_name, variant.option1_value,
@@ -98,6 +117,38 @@ async def answer_product(question: str, user: User, db: Session) -> ChatResponse
         currency=data.currency,
         current_stock_verified=data.inventory_verified,
     )
-    return ChatResponse(answer=_render_product(data), route="product", model=None,
+    category_only = bool(CATEGORY_FIELD.search(question) and not PRODUCT_INTENT.search(question)
+                         and not STOCK_INTENT.search(question))
+    if category_only:
+        label = data.category or "not recorded"
+        answer = f"{data.title or data.handle} (handle: {data.handle}) has catalog category: {label}."
+        if data.product_type and data.product_type.casefold() != "simple":
+            answer += f" Catalog type: {data.product_type}."
+    else:
+        answer = _render_product(data)
+    citations = []
+    if FULL_DETAILS.search(question):
+        url = PRODUCT_URL + data.handle
+        try:
+            points = await asyncio.to_thread(fetch_product_points, [url], user.role)
+            points = authorized_points(db, user.role, points)
+            specifications = {
+                name: value for variant in data.variants for name, value in (
+                    (variant.option1_name, variant.option1_value),
+                    (variant.option2_name, variant.option2_value),
+                    (variant.option3_name, variant.option3_value),
+                ) if name and value
+            }
+            description = _description(points, url, specifications)
+        except (httpx.HTTPError, SQLAlchemyError, ValueError, KeyError, TypeError):
+            description = None
+        if description:
+            sentence, citation = description
+            citation.number = 1
+            citations = [citation]
+            answer += f"\nRegistered product-page description: {sentence} [1]"
+        else:
+            answer += "\nNo registered product-page description was verified for this catalog item."
+    return ChatResponse(answer=answer, route="product", model=None,
                         company_data_verified=True, product_source=source,
-                        product_handles=[data.handle])
+                        product_handles=[data.handle], sources=citations)

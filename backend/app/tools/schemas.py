@@ -66,6 +66,8 @@ class ProductDetails(StrictModel):
     handle: str = Field(max_length=200)
     title: str | None = Field(max_length=500)
     vendor: str | None = Field(max_length=200)
+    category: str | None = Field(default=None, max_length=200)
+    product_type: str | None = Field(default=None, max_length=200)
     source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_exported_at: AwareDatetime | None
     imported_at: AwareDatetime

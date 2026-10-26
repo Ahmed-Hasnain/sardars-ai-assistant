@@ -28,6 +28,7 @@ CATALOG_PROMISE = re.compile(
     r"\b(?:warrant(?:y|ies)|guaranteed?\s+(?:delivery|shipping)|"
     r"free\s+(?:delivery|shipping)|in\s+stock|ships?\s+tomorrow)\b", re.I,
 )
+PRICE_SENTIMENT = re.compile(r"\b(?:price|pricing) criticism\b", re.I)
 
 
 def unsafe_descriptive_claim(text: str) -> bool:
@@ -35,9 +36,12 @@ def unsafe_descriptive_claim(text: str) -> bool:
     if INLINE_LINK.search(text) or PHYSICAL_ADDRESS.search(text):
         return True
     for sentence in re.split(r"(?<=[.!?])\s+", text):
-        if UNVERIFIED_BUSINESS_FACT.search(sentence) and (
+        # A review sample mentioning price criticism makes no current price
+        # claim. Keep guarding any separate price, stock or numeric assertion.
+        claim = PRICE_SENTIMENT.sub("cost concerns", sentence)
+        if UNVERIFIED_BUSINESS_FACT.search(claim) and (
             not SAFE_QUALIFICATION.search(sentence)
-            or ASSERTED_SENSITIVE_VALUE.search(sentence)
+            or ASSERTED_SENSITIVE_VALUE.search(claim)
         ):
             return True
     return False

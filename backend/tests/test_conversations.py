@@ -23,7 +23,7 @@ from app.main import app
 from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatResponse
 from app.services.conversations import (
-    ConversationConflict, inferred_product_handles, load_owned, purge_expired, save_turn,
+    ConversationConflict, TurnContext, inferred_product_handles, load_owned, purge_expired, save_turn,
 )
 
 
@@ -205,6 +205,19 @@ def test_corrupt_saved_handles_are_not_reused(runtime):
     with sessions() as db:
         context = load_owned(db, db.get(User, 1), identity)
         assert inferred_product_handles("Which of these is cheaper?", context) == []
+
+
+def test_this_product_carries_only_the_previous_product_handle():
+    context = TurnContext(
+        conversation=None, version=1,
+        recent=(
+            ConversationMessage(role="user", content="Show SKU TEST-1701"),
+            ConversationMessage(role="assistant", content="Catalog result", route="product",
+                                product_handles=["1689"]),
+        ),
+    )
+    assert inferred_product_handles("What category is this product?", context) == ["1689"]
+    assert inferred_product_handles("What is the return policy of this product?", context) == []
 
 
 def test_expired_conversation_is_inaccessible_and_purged(runtime):

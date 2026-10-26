@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from app.llm.base import ChatResult, ModelToolCall, ToolChatResult
 from app.rag.answer_seed import Evidence
 from app.schemas.chat import ChatResponse
-from app.services.model_assistant import answer_model_first
+from app.services.model_assistant import _sources, answer_model_first
 from app.tools.schemas import ProductCategoryResults, ToolSuccess
 
 
@@ -42,6 +42,42 @@ def test_company_question_uses_authorized_evidence_and_maps_citation():
     assert "Sardars sells bathroom fittings." in result.answer
     assert result.sources[0].source_id == "a" * 64
     assert "Sardars sells bathroom fittings." in model.chat.await_args.args[0][-2]["content"]
+
+
+def test_company_identity_uses_its_actual_about_passage_when_model_hallucinates():
+    evidence = Evidence("a" * 64, "About Us", "https://sardarandco.com/pages/about-us", None,
+                        "Our team specializes in providing luxury sanitary products to customers.")
+    model = _model("Sardars is a shoemaker. [1]")
+    with patch("app.services.model_assistant._authorized_excerpts", new_callable=AsyncMock,
+               return_value=[evidence]):
+        result = asyncio.run(answer_model_first("What is Sardars?", SimpleNamespace(role="staff"), None, model))
+    assert "luxury sanitary products" in result.answer
+    assert "shoemaker" not in result.answer
+    assert result.sources[0].source_id == evidence.source_id
+    model.chat.assert_awaited_once()
+    model.chat_with_tools.assert_not_awaited()
+
+
+def test_customer_opinion_uses_exact_qualified_faq_without_source_metadata_echo():
+    evidence = Evidence(
+        "b" * 64, "Sardars Customer Q and A", "/api/v1/ingestion/files/faq-id", None,
+        "SARDARS-FAQ-236 | What do customers say about Sardars? "
+        "Answer: The inspected directory sample includes praise for variety and staff, alongside price criticism. "
+        "This is a limited platform-specific sample. Question origin: anticipated_customer_question",
+    )
+    model = _model("Question origin: anticipated_customer_question. Everyone loves Sardars. [1]")
+    with patch("app.services.model_assistant._authorized_excerpts", new_callable=AsyncMock,
+               return_value=[evidence]):
+        result = asyncio.run(answer_model_first(
+            "What do customers say about Sardars?", SimpleNamespace(role="staff"), None, model,
+        ))
+    assert "price criticism" in result.answer
+    assert "limited platform-specific sample" in result.answer
+    assert "Question origin" not in result.answer
+    assert "Everyone loves" not in result.answer
+    assert result.sources[0].source_id == evidence.source_id
+    model.chat.assert_awaited_once()
+    model.chat_with_tools.assert_not_awaited()
 
 
 def test_missing_retrieval_still_reaches_model():
@@ -100,7 +136,68 @@ def test_product_request_reaches_model_and_uses_database_result():
     assert result.company_data_verified is True
     lookup.assert_awaited_once()
     model.chat.assert_awaited_once()
+    model.chat_with_tools.assert_not_awaited()
     assert "Authorized PostgreSQL lookup result" in model.chat.await_args.args[0][-2]["content"]
+
+
+def test_bare_sku_uses_exact_catalog_even_when_rag_excerpt_mentions_it():
+    model = _model("This SKU belongs to a different company and costs 999.")
+    evidence = Evidence("a" * 64, "General KB", "https://example.test/kb", None,
+                        "The KB mentions product IDs but has no TEST-1701 details.")
+    product = ChatResponse(answer="Acqua fan; SKU TEST-1701, price 124; catalog category: Fans.",
+                           route="product", model=None, company_data_verified=True,
+                           product_handles=["1689"])
+    with patch("app.services.model_assistant._authorized_excerpts", new_callable=AsyncMock, return_value=[evidence]), \
+         patch("app.services.model_assistant.answer_product", new_callable=AsyncMock, return_value=product) as lookup:
+        result = asyncio.run(answer_model_first(
+            "Give complete information about product TEST-1701", SimpleNamespace(role="staff"), None, model,
+        ))
+    lookup.assert_awaited_once()
+    assert result.answer == product.answer
+    assert result.product_handles == ["1689"]
+    assert "different company" not in result.answer
+    model.chat_with_tools.assert_not_awaited()
+    model.chat.assert_awaited_once()
+
+
+def test_single_product_category_followup_uses_prior_handle():
+    model = _model("It is a basin.")
+    product = ChatResponse(answer="Catalog category: Fans.", route="product", model=None,
+                           company_data_verified=True, product_handles=["1689"])
+    with patch("app.services.model_assistant._authorized_excerpts", new_callable=AsyncMock, return_value=[]), \
+         patch("app.services.model_assistant.answer_product", new_callable=AsyncMock, return_value=product) as lookup, \
+         patch("app.services.model_assistant.answer_product_discovery", new_callable=AsyncMock) as browse:
+        result = asyncio.run(answer_model_first(
+            "What is the category of this product?", SimpleNamespace(role="staff"), None, model,
+            product_handles=["1689"], previous_question="Show SKU TEST-1701",
+        ))
+    assert result.answer == "Catalog category: Fans."
+    assert lookup.await_args.kwargs["identifier"] == "1689"
+    browse.assert_not_called()
+
+
+def test_natural_fan_question_and_price_options_use_catalog_browse():
+    for question in ("Give me some fans", "Does Sardars offer fans?", "Product options under 10000"):
+        model = _model("Sardars has fans in New York and London.")
+        product = ChatResponse(answer="Matching authorized catalog products.",
+                               route="product_search", model=None, company_data_verified=True)
+        with patch("app.services.model_assistant._authorized_excerpts", new_callable=AsyncMock, return_value=[]), \
+             patch("app.services.model_assistant.answer_product_discovery", new_callable=AsyncMock,
+                   return_value=product) as browse:
+            result = asyncio.run(answer_model_first(question, SimpleNamespace(role="staff"), None, model))
+        browse.assert_awaited_once()
+        model.chat_with_tools.assert_not_awaited()
+        model.chat.assert_awaited_once()
+        assert result.answer == product.answer
+        assert "New York" not in result.answer
+
+
+def test_repeated_source_excerpts_have_one_contiguous_citation_number():
+    first = Evidence("a" * 64, "FAQ", "https://example.test/faq", None, "First fact")
+    second = Evidence("b" * 64, "About", "https://example.test/about", None, "Second fact")
+    text, citations = _sources("First [3] and another [1], second [2]; invalid [9].", [first, second, first])
+    assert text == "First [1] and another [1], second [2]; invalid ."
+    assert [(item.number, item.source_id) for item in citations] == [(1, "a" * 64), (2, "b" * 64)]
 
 
 def test_model_product_tool_call_is_executed_through_application_lookup():

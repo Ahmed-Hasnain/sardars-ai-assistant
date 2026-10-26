@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import User
 from app.llm.base import ChatMessage, ChatModel, ModelError, ToolChatResult
-from app.rag.answer_seed import Evidence, _approved_excerpts
+from app.rag.answer_seed import Evidence, _approved_excerpts, _company_description, _faq_answer
 from app.rag.routing import scope_question
 from app.rag.text_safety import contains_prompt_instruction
 from app.retrieval.search_seed import search_for_role
@@ -22,6 +23,7 @@ from app.schemas.chat import ChatResponse
 from app.services.product_answer import PRODUCT_INTENT, answer_product
 from app.services.product_discovery import answer_product_discovery
 from app.services.product_lookup import EXPLICIT_SKU
+from app.services.product_search import PRICE_BETWEEN, PRICE_LIMIT
 from app.tools.registry import execute_tool
 from app.tools.schemas import (
     ProductArguments, ProductCategoryResults, ProductSearchArguments, StrictModel, ToolInvocation,
@@ -34,13 +36,27 @@ MAX_TOOL_CALLS = 2
 FOLLOWUP_QUERY_CHARS = 200
 SOURCE_MARKER = re.compile(r"\[(\d+)\]")
 PRODUCT_BROWSE = re.compile(r"\b(?:products|catalog(?:ue)?|recommend|suggest|show|list|browse|compare)\b", re.I)
+PRODUCT_NOUN = re.compile(
+    r"\b(?:products?|items?|catalog(?:ue)?|fans?|basins?|mixers?|showers?|"
+    r"taps?|faucets?|tiles?|toilets?|sinks?|vanit(?:y|ies)|lights?|drains?)\b", re.I,
+)
+PRODUCT_REQUEST = re.compile(
+    r"\b(?:give|show|find|list|browse|search|recommend|suggest|compare|"
+    r"sell|sells|offer|offers|have|has|carry|carries|get|buy)\b", re.I,
+)
+SKU_TOKEN = re.compile(r"\b[A-Z]{2,12}-[A-Z0-9-]*\d[A-Z0-9-]*\b", re.I)
+SINGULAR_PRODUCT_FOLLOWUP = re.compile(r"\b(?:this product|that product|its (?:category|type|details))\b", re.I)
+COMPANY_IDENTITY = re.compile(r"^\s*(?:what is|who are)\s+sardars\s*\??\s*$", re.I)
+CUSTOMER_OPINION = re.compile(
+    r"^\s*(?:ok\s*,?\s*)?(?:(?:can you )?tell me\s+)?what\s+(?:do\s+)?"
+    r"(?:customers|people)\s+say\s+about\s+sardars\s*\??\s*$", re.I,
+)
 CATEGORY_ONLY = re.compile(
     r"\b(?:categories|types|kinds)\b.{0,80}\bproducts?\b|"
     r"\bproducts?\b.{0,80}\b(?:categories|types|kinds)\b", re.I,
 )
 PRODUCT_FACT = re.compile(r"\b(?:sku|prices?|pricing|cost|stock|inventory|availability|available|how much)\b", re.I)
 GREET = re.compile(r"^\s*(?:hi|hello|hey|good (?:morning|afternoon|evening))(?:[,!.? ]|how are you)*\s*$", re.I)
-MODEL_EXACT_FACT = re.compile(r"\b(?:sku|prices?|stock|inventory|availability|available|delivery|warranty|returns?)\b|\d", re.I)
 
 
 class SourceSearchArguments(StrictModel):
@@ -99,9 +115,21 @@ def _evidence_message(excerpts: list[Evidence]) -> str:
 
 
 def _sources(text: str, excerpts: list[Evidence]) -> tuple[str, list[SourceCitation]]:
-    used = sorted({int(number) for number in SOURCE_MARKER.findall(text) if 1 <= int(number) <= len(excerpts)})
-    clean = SOURCE_MARKER.sub(lambda match: match.group() if int(match.group(1)) in used else "", text).strip()
-    return clean, [SourceCitation(**vars(excerpts[number - 1].cited_source(number))) for number in used]
+    citations: list[SourceCitation] = []
+    by_source: dict[str, int] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        index = int(match.group(1)) - 1
+        if not 0 <= index < len(excerpts):
+            return ""
+        excerpt = excerpts[index]
+        if excerpt.source_id not in by_source:
+            number = len(citations) + 1
+            by_source[excerpt.source_id] = number
+            citations.append(SourceCitation(**vars(excerpt.cited_source(number))))
+        return f"[{by_source[excerpt.source_id]}]"
+
+    return SOURCE_MARKER.sub(replace, text).strip(), citations
 
 
 def _base_messages(question: str, excerpts: list[Evidence], previous_question: str | None) -> list[ChatMessage]:
@@ -136,10 +164,29 @@ async def answer_model_first(
     previous_question: str | None = None,
 ) -> ChatResponse:
     """Every normal turn reaches the model; all data/tool permissions stay in code."""
+    started = monotonic()
     excerpts = [] if GREET.fullmatch(question) else await _authorized_excerpts(search_query or question, user, db)
-    messages = _base_messages(question, excerpts, previous_question)
+    retrieval_ms = round((monotonic() - started) * 1000)
+    identity_evidence = _company_description(excerpts) if COMPANY_IDENTITY.fullmatch(question) else None
+    opinion_faq = (_faq_answer("What do customers say about Sardars?", excerpts)
+                   if CUSTOMER_OPINION.fullmatch(question) else None)
+    explicit_sku = EXPLICIT_SKU.search(question)
+    sku_token = SKU_TOKEN.search(question)
+    multiple_skus = len({token.casefold() for token in SKU_TOKEN.findall(question)}) > 1
+    singular_handle = (product_handles[0] if product_handles and len(product_handles) == 1
+                       and SINGULAR_PRODUCT_FOLLOWUP.search(question) else None)
+    category_request = bool(CATEGORY_ONLY.search(question) and not singular_handle)
+    product_request = bool(
+        explicit_sku or sku_token or singular_handle or PRODUCT_INTENT.search(question)
+        or PRODUCT_FACT.search(question)
+        or ((PRICE_LIMIT.search(question) or PRICE_BETWEEN.search(question))
+            and PRODUCT_NOUN.search(question))
+        or (PRODUCT_REQUEST.search(question) and PRODUCT_NOUN.search(question))
+        or (product_handles and PRODUCT_BROWSE.search(question))
+    )
     decision: ToolChatResult | None = None
-    if not GREET.fullmatch(question):
+    if (not GREET.fullmatch(question) and not product_request and not category_request
+            and identity_evidence is None and opinion_faq is None):
         try:
             decision = await asyncio.wait_for(model.chat_with_tools(_choice_messages(question, excerpts), READ_TOOLS), timeout=30)
         except (ModelError, TimeoutError):
@@ -168,12 +215,12 @@ async def answer_model_first(
                     lookup = (question if EXPLICIT_SKU.search(question) else
                               f"SKU {arguments.identifier}" if arguments.identifier else arguments.question)
                     product = await asyncio.wait_for(answer_product(lookup, user, db), timeout=10)
-                elif call.name == "search_products" and product is None and not CATEGORY_ONLY.search(question):
+                elif call.name == "search_products" and product is None and not category_request:
                     ProductSearchArguments.model_validate(call.arguments)
                     product = await asyncio.wait_for(
                         answer_product_discovery(question, user, db, product_handles), timeout=35,
                     )
-                elif call.name == "list_product_categories" and CATEGORY_ONLY.search(question):
+                elif call.name == "list_product_categories" and category_request:
                     result = execute_tool(ToolInvocation(name=call.name, arguments=call.arguments), db, user)
                     if result.ok and isinstance(result.data, ProductCategoryResults):
                         categories = result.data
@@ -181,9 +228,20 @@ async def answer_model_first(
                 logger.info("model_assistant rejected_or_timed_out_tool name=%s", call.name[:64])
 
     # Model omission does not bypass the database for explicit product facts.
-    if product is None and not CATEGORY_ONLY.search(question) and (PRODUCT_INTENT.search(question) or PRODUCT_FACT.search(question)):
+    if product is None and not category_request and product_request:
         try:
-            if PRODUCT_BROWSE.search(question) or product_handles:
+            if multiple_skus:
+                product = await asyncio.wait_for(
+                    answer_product_discovery(question, user, db, product_handles), timeout=35,
+                )
+            elif explicit_sku or sku_token:
+                product = await asyncio.wait_for(answer_product(question, user, db), timeout=10)
+            elif singular_handle:
+                product = await asyncio.wait_for(
+                    answer_product(question, user, db, identifier=singular_handle), timeout=10,
+                )
+            elif (PRODUCT_BROWSE.search(question) or PRODUCT_NOUN.search(question)
+                  or product_handles):
                 product = await asyncio.wait_for(
                     answer_product_discovery(question, user, db, product_handles), timeout=35,
                 )
@@ -191,15 +249,7 @@ async def answer_model_first(
                 product = await asyncio.wait_for(answer_product(question, user, db), timeout=10)
         except asyncio.TimeoutError:
             product = ChatResponse(answer="Product lookup timed out.", route="product", model=None)
-    elif product is None and not CATEGORY_ONLY.search(question) and PRODUCT_BROWSE.search(question):
-        try:
-            product = await asyncio.wait_for(
-                answer_product_discovery(question, user, db, product_handles), timeout=35,
-            )
-        except asyncio.TimeoutError:
-            product = ChatResponse(answer="Product search timed out.", route="product_search", model=None)
-
-    if categories is None and CATEGORY_ONLY.search(question):
+    if categories is None and category_request:
         result = execute_tool(ToolInvocation(name="list_product_categories", arguments={}), db, user)
         if result.ok and isinstance(result.data, ProductCategoryResults):
             categories = result.data
@@ -215,6 +265,13 @@ async def answer_model_first(
     response = await model.chat(final_messages)
     text, model_name = response.text, response.model
     prompt_tokens, output_tokens, duration_ms = response.prompt_tokens, response.output_tokens, response.duration_ms
+    logger.info(
+        "model_assistant answer catalog=%s category_list=%s tool_choice_calls=%d "
+        "retrieval_ms=%d model_ms=%s total_ms=%d excerpts=%d",
+        product is not None, categories is not None,
+        len(decision.tool_calls) if decision else 0, retrieval_ms, duration_ms,
+        round((monotonic() - started) * 1000), len(excerpts),
+    )
 
     if contains_prompt_instruction(text):
         text = "I can't help with that instruction, but I can help with a Sardars or bathroom-product question."
@@ -231,13 +288,29 @@ async def answer_model_first(
             answer=answer, route="product_search", model=model_name,
             prompt_tokens=prompt_tokens, output_tokens=output_tokens, duration_ms=duration_ms,
         )
+    if COMPANY_IDENTITY.fullmatch(question):
+        description = identity_evidence or _company_description(excerpts)
+        if description is not None:
+            return ChatResponse(
+                answer=f"Sardars describes itself this way: {description.text} [1]",
+                route="company", model=model_name,
+                sources=[SourceCitation(**vars(description.cited_source(1)))],
+                prompt_tokens=prompt_tokens, output_tokens=output_tokens, duration_ms=duration_ms,
+            )
+    if CUSTOMER_OPINION.fullmatch(question):
+        faq = opinion_faq or _faq_answer("What do customers say about Sardars?", excerpts)
+        if faq is not None:
+            return ChatResponse(
+                answer=faq.text, route="company", model=model_name,
+                sources=[SourceCitation(**vars(source)) for source in faq.sources],
+                prompt_tokens=prompt_tokens, output_tokens=output_tokens, duration_ms=duration_ms,
+            )
     if product is not None:
-        # The model may explain a lookup, but exact changing values come only
-        # from the application-rendered PostgreSQL result below.
-        intro = (SOURCE_MARKER.sub("", text).strip() if text and not MODEL_EXACT_FACT.search(text)
-                 else "Here is what the product database returned.")
+        # A small model can add invented locations or values even after a
+        # correct lookup. Use the checked catalog/page rendering as the answer;
+        # the model still receives the lookup for this prototype turn.
         return ChatResponse(
-            answer=f"{intro}\n\n{product.answer}", route=product.route,
+            answer=product.answer, route=product.route,
             sources=product.sources, model=model_name,
             company_data_verified=product.company_data_verified,
             product_source=product.product_source, products=product.products,

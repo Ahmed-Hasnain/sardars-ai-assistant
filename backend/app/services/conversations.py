@@ -23,8 +23,8 @@ MAX_CONTEXT_MESSAGES = 8
 MAX_CONTEXT_CHARS = 1600
 MAX_RECENT_ROWS = 12
 HIDDEN_ANSWER = "This earlier answer is no longer available under your current source access."
-FOLLOWUP = re.compile(r"^(?:and\b|what about\b|how about\b|which (?:of (?:these|those)|one)\b)|\b(?:it|its|they|them|those|these|their)\b", re.I)
-PRODUCT_FOLLOWUP = re.compile(r"\b(?:which of these|which of those|which one|these|those|them|their|it|its)\b", re.I)
+FOLLOWUP = re.compile(r"^(?:and\b|what about\b|how about\b|which (?:of (?:these|those)|one)\b)|\b(?:it|its|they|them|those|these|their|this product|that product)\b", re.I)
+PRODUCT_FOLLOWUP = re.compile(r"\b(?:which of these|which of those|which one|these|those|them|their|it|its|this product|that product)\b", re.I)
 POLICY_TOPIC = re.compile(r"\b(?:warranty|return|refund|delivery|shipping|policy)\b", re.I)
 SAFE_HANDLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,199}\Z")
 

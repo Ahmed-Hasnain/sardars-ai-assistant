@@ -69,14 +69,17 @@ def _details(db: Session, allowed: set[str], rows: list, match: str) -> ProductD
     first = rows[0]
     if len({row.source_file_sha256 for row in rows}) != 1:
         raise TooManyVariants()
-    # Shopify continuation rows usually lack title/vendor; fetch only those two
-    # permitted fields from a visible row of the same product.
-    identity = db.execute(select(Product.title, Product.vendor).where(
+    # Shopify continuation rows lack identity fields; read the visible title row.
+    identity = db.execute(select(
+        Product.title, Product.vendor, Product.meta_custom_category, Product.product_type,
+    ).where(
         Product.handle == first.handle, Product.visibility.in_(allowed),
         Product.title.is_not(None),
     ).order_by(Product.source_row_number).limit(1)).first()
     title = _display(identity.title) if identity else None
     vendor = _display(identity.vendor) if identity else None
+    category = _display(identity.meta_custom_category) if identity else None
+    product_type = _display(identity.product_type) if identity else None
     variants = [ProductVariant(
         source_row_number=row.source_row_number, row_kind=row.source_row_kind,
         sku=_display(row.variant_sku),
@@ -89,6 +92,7 @@ def _details(db: Session, allowed: set[str], rows: list, match: str) -> ProductD
     return ProductDetails(
         observed_at=datetime.now(timezone.utc), query_match=match,
         handle=first.handle, title=title, vendor=vendor,
+        category=category, product_type=product_type,
         source_file_sha256=first.source_file_sha256,
         source_exported_at=_utc(first.source_exported_at),
         imported_at=_utc(first.imported_at), currency=first.snapshot_currency,
