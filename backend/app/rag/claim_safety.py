@@ -16,7 +16,8 @@ PHYSICAL_ADDRESS = re.compile(
 SAFE_QUALIFICATION = re.compile(
     r"\b(?:does not by itself prove|requires checking|check the|check for|"
     r"not automatically guaranteed|not verified|not confirmed|cannot verify|"
-    r"can't verify|should not be presented as current)\b", re.I,
+    r"can't verify|does not establish|depends on the current written policy|"
+    r"should not be presented as current)\b", re.I,
 )
 ASSERTED_SENSITIVE_VALUE = re.compile(
     r"\b(?:in stock|available now|currently available|warranty covers|"

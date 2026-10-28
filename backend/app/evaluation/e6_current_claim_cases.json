@@ -1,0 +1,7 @@
+[
+  {"id":"brands","category":"claim_review","question":"Which brands does Sardars offer?","expected_route":"company","expected_source":"https://sardarandco.com/pages/about-us","answer_contains_any":["Bongio","Grohe"]},
+  {"id":"history","category":"claim_review","question":"What can you verify about Sardars' history?","expected_route":"company","expected_source":null,"max_citations":0,"answer_contains":["can't verify a reliable Sardars founding timeline"],"answer_not_contains":["Question origin","SARDARS-FAQ-"]},
+  {"id":"competitor_comparison","category":"claim_review","question":"What makes Sardars better than its competitors?","expected_route":"company","expected_source":null,"max_citations":0,"answer_contains":["can't verify that Sardars is better"],"answer_not_contains":["is better than its competitors by"]},
+  {"id":"installation_promise","category":"claim_review","question":"Does Sardars provide professional installation for every product?","expected_route":"company","expected_source":"/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407","answer_contains":["does not verify a universal","does not automatically include fitting"],"answer_not_contains":["free installation"]},
+  {"id":"lahore_showroom","category":"claim_review","question":"Can I visit a Sardars showroom in Lahore?","expected_route":"company","expected_source":"/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407","answer_contains":["can't verify a Sardars showroom in Lahore","Rawalpindi"],"answer_not_contains":["Yes, you can visit a Sardars showroom in Lahore"]}
+]

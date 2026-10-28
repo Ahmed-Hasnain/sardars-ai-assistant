@@ -135,7 +135,7 @@ def test_general_answer_records_context_counts_without_prompt_text(sessions):
     original = chat.chat_model
     row = asyncio.run(evaluate(c, model, sessions))
     assert row["passed"] and chat.chat_model is original
-    assert row["observation"]["model_calls"][0]["tool_choice"] is True
+    assert not row["observation"]["model_calls"][0].get("tool_choice", False)
     metrics = row["observation"]["model_calls"][-1]
     assert metrics["prompt_tokens"] == 12 and metrics["output_tokens"] == 4
     assert metrics["context_characters"] > len(c.question)

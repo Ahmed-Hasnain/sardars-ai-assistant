@@ -13,14 +13,16 @@ class OllamaChatModel:
         self.output_limit = output_limit
         self.tool_output_limit = tool_output_limit
 
-    async def chat(self, messages: list[ChatMessage]) -> ChatResult:
+    async def chat(self, messages: list[ChatMessage], *, output_limit: int | None = None) -> ChatResult:
+        if output_limit is not None and not 1 <= output_limit <= self.output_limit:
+            raise ValueError("Output limit must be within the configured bound")
         payload = {
             "model": self.settings.ollama_model,
             "messages": messages,
             "stream": False,
             "think": False,
             "keep_alive": self.settings.ollama_chat_keep_alive,
-            "options": {"num_predict": self.output_limit},
+            "options": {"num_predict": output_limit or self.output_limit},
         }
 
         try:
