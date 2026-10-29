@@ -2,7 +2,7 @@
 
 A self-hosted AI assistant for Sardars staff. It combines a local language model with approved company documents, a PostgreSQL product catalog, and bounded web search so answers can use the right source for the question.
 
-**Status:** Internal prototype. E1–E7 checkpoints are complete in their measured scopes; [E8 live acceptance](EXTENDED_PLAN.md) is next. This is not a public customer service or a production deployment.
+**Status:** The internal-prototype implementation cycle is closed. E1–E7 checkpoints are complete in their measured scopes; [E8 live acceptance](EXTENDED_PLAN.md) and production deployment are deferred. This is not a public customer service or a production deployment.
 
 ## What it does
 
