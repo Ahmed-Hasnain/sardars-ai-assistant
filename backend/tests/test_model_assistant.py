@@ -15,7 +15,7 @@ from app.db.models import SourceRegistration
 from app.llm.base import ChatResult, ModelToolCall, ToolChatResult
 from app.rag.answer_seed import Evidence
 from app.schemas.chat import ChatResponse
-from app.services.model_assistant import _sources, answer_model_first
+from app.services.model_assistant import _concise_general, _sources, answer_model_first
 from app.tools.schemas import ProductCategoryResults, ToolSuccess
 
 
@@ -296,6 +296,21 @@ def test_general_product_education_reaches_model_without_company_tool_choice():
     assert "water temperature" in result.answer and result.route == "general"
     model.chat.assert_awaited_once()
     model.chat_with_tools.assert_not_awaited()
+    assert model.chat.await_args.kwargs["output_limit"] == 80
+
+
+def test_general_education_drops_repeated_and_truncated_tail():
+    model = _model("A thermostatic mixer keeps water temperature steady. "
+                   "It adjusts the hot and cold flow. A thermostatic mixer keeps water")
+    with patch("app.services.model_assistant._authorized_excerpts", new_callable=AsyncMock, return_value=[]):
+        result = asyncio.run(answer_model_first("What is a thermostatic mixer?", SimpleNamespace(role="staff"), None, model))
+    assert result.answer == "A thermostatic mixer keeps water temperature steady. It adjusts the hot and cold flow."
+
+
+def test_general_sentence_cleanup_keeps_decimal_numbers():
+    assert _concise_general("A 2.4 GHz band is common. It can be congested. Another incomplete") == (
+        "A 2.4 GHz band is common. It can be congested."
+    )
 
 
 def test_general_education_does_not_misattribute_a_product_page_citation():

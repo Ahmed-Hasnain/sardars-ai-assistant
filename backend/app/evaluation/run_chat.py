@@ -38,7 +38,7 @@ from app.retrieval.seed_config import COLLECTION, MODEL
 from app.schemas.chat import ChatRequest, ChatResponse
 
 CASES_PATH = Path(__file__).with_name("chat_cases.json")
-ToolName = Literal["get_product_details", "search_products", "get_source_status", "list_product_categories"]
+ToolName = Literal["get_product_details", "search_products", "get_source_status", "list_product_categories", "search_web"]
 
 
 class ChatCase(Case):
@@ -185,6 +185,7 @@ def stock_facts(case: ChatCase, response: ChatResponse, db: Session) -> bool | N
 
 def check_response(case: ChatCase, response: ChatResponse, observation: Observation, db: Session) -> dict:
     permitted = {(row["source_id"], row["url"]) for row in observation.authorized_sources}
+    web_urls = {row["url"] for row in observation.web_results}
     markers = {int(value) for value in re.findall(r"\[(\d+)\]", response.answer)}
     checks = {
         "routing": response.route == case.expected_route,
@@ -195,7 +196,11 @@ def check_response(case: ChatCase, response: ChatResponse, observation: Observat
         "retrieval": (case.expected_source in {row["url"] for row in observation.authorized_sources}
                       if case.expected_source else None),
         "citations": (markers == {source.number for source in response.sources}
-                      and all((source.source_id, source.url) in permitted for source in response.sources)),
+                      and all(((source.source_id, source.url) in permitted if source.origin == "company" else
+                               source.url in web_urls and source.source_id.startswith("web:"))
+                              for source in response.sources)),
+        "web_provenance": (all(source.origin == "web" for source in response.sources)
+                           if "search_web" in case.expected_tools else None),
         "max_citations": len(response.sources) <= case.max_citations if case.max_citations is not None else None,
         "expected_source": (case.expected_source in {source.url for source in response.sources}
                             if case.expected_source else None),
@@ -275,6 +280,10 @@ def summarize(rows: list[dict]) -> dict:
                                             if call.get("output_tokens") is not None),
         "model_calls_without_token_counts": sum(call.get("prompt_tokens") is None or call.get("output_tokens") is None
                                                for call in calls),
+        "web_search_calls": sum(row["name"] == "search_web" for case in live for row in case["observation"].get("tools", [])),
+        "web_search_successes": sum(row["name"] == "search_web" and row["ok"] for case in live
+                                    for row in case["observation"].get("tools", [])),
+        "model_requested_web_search": sum("search_web" in call.get("requested_tools", []) for call in calls),
         "max_model_context_characters": max((call["context_characters"] for call in calls), default=None),
     }
 

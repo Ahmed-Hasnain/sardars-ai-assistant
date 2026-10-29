@@ -33,4 +33,4 @@ class ConversationPage(BaseModel):
     conversation: ConversationSummary
     messages: list[MessageView]
     next_before_message_id: int | None
-    historical_notice: str = "Earlier answers are historical. Recheck prices, stock, and policies. Citations link currently authorized sources whose content may have changed."
+    historical_notice: str = "Earlier answers are historical. Recheck prices, stock, and policies. Company citations link currently authorized sources; web links are snapshots from the shown search time and may have changed."

@@ -58,7 +58,9 @@ function MessageCard({ message }: { message: Message }) {
                 ) : href ? (
                   <a className="source-link" key={`${source.source_id}-${source.number}`} href={href} target="_blank" rel="noopener noreferrer">
                     <span className="source-index">{source.number}</span>
-                    <span>{source.title}</span>
+                    <span>{source.origin === 'web'
+                      ? `Web · ${source.title.replace(/^Web: /, '')}${source.fetched_at ? ` · searched ${new Date(source.fetched_at).toLocaleString()}` : ''}`
+                      : source.title}</span>
                     <span aria-hidden="true">↗</span>
                   </a>
                 ) : (

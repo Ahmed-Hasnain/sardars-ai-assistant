@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     conversation_retention_days: int = Field(default=30, ge=1, le=365)
 
     qdrant_base_url: str = "http://127.0.0.1:6333"
+    web_search_base_url: str | None = None
     brand_definition_profile_url: str | None = "https://sardarandco.com/pages/about-us"
     import_timeout_seconds: float = Field(default=300, gt=0, le=600)
     large_text_import_timeout_seconds: float = Field(default=7200, ge=600, le=7200)

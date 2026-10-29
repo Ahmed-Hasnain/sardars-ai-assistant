@@ -9,3 +9,4 @@ __pycache__/
 data/extracted/
 data/uploads/
 data/e6_*.json
+data/e7_*.json

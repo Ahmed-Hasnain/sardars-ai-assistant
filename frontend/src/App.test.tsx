@@ -54,7 +54,9 @@ it('renders cited Markdown while blocking raw HTML and unsafe links', () => {
     messages: [{ id: '1', role: 'assistant',
       text: '**Supported** answer.\n\n| Item | Value |\n| --- | --- |\n| Mixer | Brass |\n\n<script>alert(1)</script> [bad](javascript:alert(2)) [unapproved](https://evil.example)',
       sources: [{ number: 1, source_id: 'a', title: 'About', url: 'https://example.com/about', fetched_at: null },
-        { number: 2, source_id: 'b', title: 'Profile.pdf', url: '/api/v1/ingestion/files/11111111-1111-1111-1111-111111111111', fetched_at: null }],
+        { number: 2, source_id: 'b', title: 'Profile.pdf', url: '/api/v1/ingestion/files/11111111-1111-1111-1111-111111111111', fetched_at: null },
+        { number: 3, source_id: 'web:c', title: 'Web: Python releases', url: 'https://www.python.org/downloads/',
+          fetched_at: '2026-10-29T00:00:00Z', origin: 'web' }],
     }],
   }
   const html = renderToStaticMarkup(<App />)
@@ -65,5 +67,7 @@ it('renders cited Markdown while blocking raw HTML and unsafe links', () => {
   expect(html).not.toContain('href="https://evil.example')
   expect(html).toContain('href="https://example.com/about"')
   expect(html).toContain('Profile.pdf')
+  expect(html).toContain('Web · Python releases')
+  expect(html).toContain('searched')
   expect(html).toContain('type="button"')
 })

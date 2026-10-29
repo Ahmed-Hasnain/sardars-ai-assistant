@@ -1,7 +1,7 @@
 # Sardars AI Assistant — extended plan
 
-Last reviewed: 2026-10-22
-Status: active roadmap; E1–E6 and the developer-requested E6 model-first prototype follow-up are complete on this laptop. E7 is the next optional checkpoint. Human claim review and production readiness remain later work.
+Last reviewed: 2026-10-29
+Status: active roadmap; E1–E7 and the developer-requested E6 model-first prototype follow-up are complete in their measured scopes on this laptop. E8 live internal acceptance is next. Human claim review and production readiness remain later work.
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
@@ -116,11 +116,13 @@ E6 follow-up exit, verified 2026-10-28: The current-flow replay passed **14/14**
 
 Goal: add external information only for questions that benefit from it, with distinct provenance.
 
-- [ ] Decide whether the use case needs internet search; compare a self-hosted search service with an approved provider, including privacy/network implications.
-- [ ] If adopted, allowlist the search tool, cap queries/results/time, apply domain safety and safe errors, and define citation provenance and cache expiry. Treat result text as untrusted.
-- [ ] Test injection, authorization, unavailable results and citations. Never use web results alone to assert current Sardars price, stock, policy or other controlled facts.
+- [x] Decide whether the use case needs internet search; compare a self-hosted search service with an approved provider, including privacy/network implications.
+- [x] If adopted, allowlist the search tool, cap queries/results/time, apply domain safety and safe errors, and define citation provenance and cache expiry. Treat result text as untrusted.
+- [x] Test injection, authorization, unavailable results and citations. Never use web results alone to assert current Sardars price, stock, policy or other controlled facts.
 
 Exit: either a tested bounded search path with clear source labels or a documented decision to defer it.
+
+E7 exit, verified 2026-10-29: The eight-case live replay passed **8/8** declared checks; all three eligible current-external questions triggered model-selected, successful web searches and returned distinct cited web evidence. Five company/catalog/general/unsafe controls made no web call. The full backend suite passed **702, four skipped**; frontend tests/build, additive migration/no-drift, local readiness and anonymous access checks passed. The eight-case median/p95 was **14.81/29.25 seconds**, and the web-turn median/p95 was **27.77/29.25 seconds**. Search runs through local SearXNG but queries still reach upstream engines. Release-answer corrections fixed observed beta promotion and wrong-citation failures; freeform small-model quality and search latency remain E8 review items. See [E7 checkpoint](docs/e7_search_checkpoint.md).
 
 ## E8 — Live internal acceptance
 

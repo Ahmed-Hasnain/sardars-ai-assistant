@@ -19,6 +19,7 @@ class Observation:
     model_calls: list[dict] = field(default_factory=list)
     # Bounded authorized excerpts make independent claim/citation review possible.
     evidence: list[dict] = field(default_factory=list)
+    web_results: list[dict] = field(default_factory=list)
 
 
 class ObservedModel:
@@ -78,6 +79,11 @@ def observe(model: ChatModel) -> Iterator[Observation]:
             observation.tools.append({"name": call.name, "ok": result.ok,
                                       "error_code": None if result.ok else result.error.code,
                                       "total_ms": round((perf_counter() - started) * 1000, 1)})
+            if call.name == "search_web" and result.ok:
+                observation.web_results.extend({
+                    "url": hit.url, "title": hit.title, "snippet": hit.snippet,
+                    "observed_at": result.data.observed_at.isoformat(),
+                } for hit in result.data.hits)
             return result
         return execute
 

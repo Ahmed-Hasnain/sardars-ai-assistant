@@ -175,6 +175,26 @@ def test_revoked_source_redacts_historical_answer(runtime):
     assert "Private source answer" not in str(page)
 
 
+def test_web_citation_survives_history_refresh_without_company_registry(runtime):
+    client, sessions = runtime
+    citation = SourceCitation(
+        number=1, source_id="web:" + "a" * 64, title="Web: Python releases",
+        url="https://www.python.org/downloads/", fetched_at="2026-10-29T00:00:00+00:00", origin="web",
+    )
+    with patch("app.api.chat.answer_model_first", new_callable=AsyncMock,
+               return_value=_answer("Python release information [1]", sources=[citation])):
+        response = client.post("/api/v1/chat", headers=headers(), json={"message": "Latest Python release?"})
+    assert response.status_code == 200
+    identity = response.json()["conversation_id"]
+    page = client.get(f"/api/v1/conversations/{identity}", headers=headers()).json()
+    assert page["messages"][1]["sources"][0]["origin"] == "web"
+    assert page["messages"][1]["sources"][0]["url"] == "https://www.python.org/downloads/"
+    assert client.get(f"/api/v1/conversations/{identity}", headers=headers(2)).status_code == 404
+    with sessions() as db:
+        saved = db.scalar(select(ConversationMessage).where(ConversationMessage.role == "assistant"))
+        assert saved.source_ids == [] and len(saved.web_sources) == 1
+
+
 def test_hidden_product_redacts_historical_answer(runtime):
     client, sessions = runtime
     with sessions.begin() as db:

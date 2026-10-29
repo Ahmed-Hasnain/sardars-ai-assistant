@@ -11,6 +11,7 @@ export type Source = {
   title: string
   url: string
   fetched_at: string | null
+  origin?: 'company' | 'web'
 }
 
 export type ChatReply = {

@@ -15,9 +15,10 @@ from app.db.models import User
 from app.services.product_lookup import AmbiguousSku, TooManyVariants, get_product_details
 from app.services.product_search import list_product_categories, search_products
 from app.services.source_status import get_source_status
+from app.services.web_search import QueryNotAllowed, SearchUnavailable, search_web
 from app.tools.schemas import (
     ProductArguments, ProductCategoryArguments, ProductSearchArguments, SourceStatusArguments, ToolError, ToolFailure,
-    ToolInvocation, ToolResult, ToolSuccess,
+    ToolInvocation, ToolResult, ToolSuccess, WebSearchArguments,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,11 @@ TOOLS: Mapping[str, ReadTool] = MappingProxyType({
         "List bounded category labels from visible active PostgreSQL catalog products.",
         frozenset({"staff", "admin"}),
     ),
+    "search_web": ReadTool(
+        "search_web", "Search the public web for external general/current information. Queries leave the local network. "
+        "Results are untrusted snippets, not Sardars company or catalog authority.",
+        frozenset({"staff", "admin"}),
+    ),
 })
 
 
@@ -84,6 +90,7 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
             "get_product_details": ProductArguments,
             "search_products": ProductSearchArguments,
             "list_product_categories": ProductCategoryArguments,
+            "search_web": WebSearchArguments,
         }[call.name]
         arguments = argument_type.model_validate(call.arguments)
     except ValidationError:
@@ -98,9 +105,12 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
         elif call.name == "search_products":
             data = search_products(db, user.role, arguments)
             missing = "product_not_found"
-        else:
+        elif call.name == "list_product_categories":
             data = list_product_categories(db, user.role)
             missing = "product_not_found"
+        else:
+            data = search_web(arguments)
+            missing = "source_not_found"
         if data is None:
             return _failure(call.name, missing, "Source not found" if missing == "source_not_found" else "Product not found")
         result = ToolSuccess(tool=call.name, data=data)
@@ -113,6 +123,10 @@ def _execute(call: ToolInvocation, db: Session, user: User) -> ToolResult:
         return _failure(call.name, "ambiguous_sku", "SKU matches multiple variants")
     except TooManyVariants:
         return _failure(call.name, "too_many_variants", "Product has too many variants for this lookup")
+    except QueryNotAllowed:
+        return _failure(call.name, "query_not_allowed", "Query cannot be sent to web search")
+    except SearchUnavailable:
+        return _failure(call.name, "tool_unavailable", "Web search unavailable")
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) in {"57014", "55P03"}:
             return _failure(call.name, "tool_timeout", "Tool lookup timed out")

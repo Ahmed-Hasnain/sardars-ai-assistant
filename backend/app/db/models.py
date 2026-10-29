@@ -69,6 +69,7 @@ class ConversationMessage(Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer)
     duration_ms: Mapped[float | None] = mapped_column(Float)
     source_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    web_sources: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     product_handles: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
