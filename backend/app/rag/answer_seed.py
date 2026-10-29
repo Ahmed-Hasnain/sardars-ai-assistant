@@ -432,7 +432,16 @@ def _brand_list_answer(question: str, excerpts: list[Evidence]) -> CitedAnswer |
         description = _company_description(excerpts, source.source_id)
         if description is not None and description.text != sentence:
             sentences.append(description.text)
-    sentences.append(sentence)
+    # A brand-list question needs the named brands, not adjacent promotional
+    # language claiming every customer will find a suitable product.
+    named = re.fullmatch(
+        r"With premium brands like (?P<names>[A-Za-z,\s&-]+), every customer.*",
+        sentence, re.I,
+    )
+    if named:
+        sentences.append(f"Sardars lists {named.group('names').strip()} among its premium brands.")
+    else:
+        sentences.append(sentence)
     return CitedAnswer(" ".join(f"{item} [1]" for item in sentences), [source.cited_source(1)])
 
 

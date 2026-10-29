@@ -15,6 +15,7 @@ from app.llm.base import ChatMessage
 from app.rag.text_safety import contains_prompt_instruction
 from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatResponse
+from app.services.web_search import safe_result_url
 from app.schemas.conversations import ConversationPage, ConversationSummary, MessageView
 
 
@@ -23,8 +24,8 @@ MAX_CONTEXT_MESSAGES = 8
 MAX_CONTEXT_CHARS = 1600
 MAX_RECENT_ROWS = 12
 HIDDEN_ANSWER = "This earlier answer is no longer available under your current source access."
-FOLLOWUP = re.compile(r"^(?:and\b|what about\b|how about\b|which (?:of (?:these|those)|one)\b)|\b(?:it|its|they|them|those|these|their)\b", re.I)
-PRODUCT_FOLLOWUP = re.compile(r"\b(?:which of these|which of those|which one|these|those|them|their|it|its)\b", re.I)
+FOLLOWUP = re.compile(r"^(?:and\b|what about\b|how about\b|which (?:of (?:these|those)|one)\b)|\b(?:it|its|they|them|those|these|their|this product|that product)\b", re.I)
+PRODUCT_FOLLOWUP = re.compile(r"\b(?:which of these|which of those|which one|these|those|them|their|it|its|this product|that product)\b", re.I)
 POLICY_TOPIC = re.compile(r"\b(?:warranty|return|refund|delivery|shipping|policy)\b", re.I)
 SAFE_HANDLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,199}\Z")
 
@@ -170,7 +171,9 @@ def save_turn(
             conversation_id=conversation_id, role="assistant", content=response.answer,
             route=response.route, model=response.model, prompt_tokens=response.prompt_tokens,
             output_tokens=response.output_tokens, duration_ms=response.duration_ms,
-            source_ids=[source.source_id for source in response.sources][:8],
+            source_ids=[source.source_id for source in response.sources if source.origin == "company"][:8],
+            web_sources=[source.model_dump(mode="json") for source in response.sources
+                         if source.origin == "web"][:3],
             product_handles=_safe_handles(response.product_handles), created_at=now,
         ),
     ])
@@ -242,6 +245,16 @@ def read_page(
     for row in page:
         authorized = (set(row.source_ids or []) <= set(visible_sources)
                       and set(row.product_handles or []) <= visible_handles) if row.role == "assistant" else True
+        web_sources = []
+        if authorized and row.role == "assistant":
+            for raw in (row.web_sources or [])[:3]:
+                if isinstance(raw, dict) and safe_result_url(raw.get("url")):
+                    try:
+                        citation = SourceCitation.model_validate(raw)
+                    except ValueError:
+                        continue
+                    if citation.origin == "web" and citation.source_id.startswith("web:"):
+                        web_sources.append(citation)
         messages.append(MessageView(
             id=row.id, role=row.role, content=row.content if authorized else HIDDEN_ANSWER,
             route=row.route, model=row.model, prompt_tokens=row.prompt_tokens,
@@ -255,7 +268,7 @@ def read_page(
                 fetched_at=(visible_sources[source_id].fetched_at.isoformat()
                             if visible_sources[source_id].fetched_at else None),
             ) for number, source_id in enumerate(dict.fromkeys(row.source_ids or []), start=1)]
-            if authorized and row.role == "assistant" else [],
+            + web_sources if authorized and row.role == "assistant" else [],
             created_at=row.created_at,
         ))
     return ConversationPage(

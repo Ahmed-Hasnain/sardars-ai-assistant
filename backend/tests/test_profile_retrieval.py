@@ -46,12 +46,16 @@ def test_bongio_profile_lookup_and_semantic_search_share_staff_permission_filter
         assert {"key": "review_status", "match": {"value": "approved"}} in body["filter"]["must"]
 
 
-def test_company_business_question_includes_authorized_profile(monkeypatch):
+@pytest.mark.parametrize("question", [
+    "What is the category of business in which Sardars deal?",
+    "Tell me about Sardars and what it sells",
+])
+def test_company_business_question_includes_authorized_profile(monkeypatch, question):
     preferred = [{"id": "profile-0"}, {"id": "profile-1"}]
     semantic = [{"id": str(index)} for index in range(6)]
     calls = setup(monkeypatch, preferred, semantic)
 
-    points = search_seed.search_for_role("What is the category of business in which Sardars deal?", "staff")
+    points = search_seed.search_for_role(question, "staff")
 
     assert points == preferred + semantic
     scroll, query = calls[1:3]

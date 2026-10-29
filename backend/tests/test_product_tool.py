@@ -1,6 +1,7 @@
 """Staff product questions use authorized PostgreSQL values through the registry."""
 
 import asyncio
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
+from app.db.models import SourceRegistration
 from app.db.products import Product
 from app.services.product_answer import answer_product
 from app.services import product_answer
@@ -29,6 +31,7 @@ def products():
     with sessions.begin() as db:
         db.add_all([
             Product(**common, source_row_number=1, title="Basin One", vendor="Sardars",
+                    meta_custom_category="Sanitary Fittings", product_type="Basin",
                     source_row_kind="variant", price_origin="synthetic_test", sku_origin="synthetic_test",
                     variant_sku="TEST-1", variant_price=150, variant_inventory_qty=7,
                     option1_name="Size", option1_value="Small"),
@@ -118,12 +121,68 @@ def test_chat_uses_database_without_model_choice(products):
     assert response.product_source.external_sync_verified is False
     assert response.product_source.current_stock_verified is True
     assert "SKU TEST-1" in response.answer and "price 150" in response.answer
+    assert "Catalog category: Sanitary Fittings" in response.answer
+    assert "Catalog type: Basin" in response.answer
     assert "SKU TEST-2" in response.answer and "price 250" in response.answer
     assert "database stock 7 units" in response.answer and "database stock 0 units" in response.answer
     assert "synthetic" not in response.answer.lower()
     assert "image-only CSV row" in image.answer and "price 300" in image.answer
     assert image.product_source.current_stock_verified is False
     assert "database stock not recorded" in image.answer
+
+
+def test_complete_product_answer_does_not_use_unrelated_kb_as_description(products, monkeypatch):
+    monkeypatch.setattr(product_answer, "fetch_product_points", lambda *args: [])
+    with products() as db:
+        response = asyncio.run(answer_product(
+            "Give complete information about TEST-1", SimpleNamespace(role="staff", is_active=True), db,
+        ))
+    assert "Catalog category: Sanitary Fittings" in response.answer
+    assert "No registered product-page description was verified" in response.answer
+    assert response.sources == []
+
+
+def test_single_product_category_answer_omits_unrequested_variant_values(products):
+    with products() as db:
+        response = asyncio.run(answer_product(
+            "What is the category of this product?",
+            SimpleNamespace(role="staff", is_active=True), db, identifier="basin-one",
+        ))
+    assert "catalog category: Sanitary Fittings" in response.answer
+    assert "Catalog type: Basin" in response.answer
+    assert "SKU TEST-1" not in response.answer
+    assert "price 150" not in response.answer
+
+
+def test_full_details_cite_only_the_registered_visible_product_page(products, monkeypatch):
+    url = "https://sardarandco.com/products/basin-one"
+    source_id = sha256(url.encode()).hexdigest()
+    with products.begin() as db:
+        db.add(SourceRegistration(
+            source_id=source_id, url=url, source_type="products", content_sha256="b" * 64,
+            visibility="staff", is_active=True, index_status="ready",
+            authorization_basis="owner_authorized_source_for_internal_use",
+        ))
+    point = {"id": "one", "payload": {
+        "source_id": source_id, "url": url, "title": "Basin One", "source_type": "products",
+        "visibility": "staff", "review_status": "approved", "prototype_only": False,
+        "content_sha256": "b" * 64, "index_generation": None, "chunk_index": 0,
+        "text": "Basin One uses a ceramic cartridge for controlled water flow.",
+        "fetched_at": "2026-10-01T00:00:00+00:00",
+    }}
+    monkeypatch.setattr(product_answer, "fetch_product_points", lambda *args: [point])
+    actor = SimpleNamespace(role="staff", is_active=True)
+    with products() as db:
+        visible = asyncio.run(answer_product("Complete details for SKU TEST-1", actor, db))
+    assert "ceramic cartridge" in visible.answer
+    assert "[1]" in visible.answer
+    assert [(source.number, source.source_id) for source in visible.sources] == [(1, source_id)]
+    with products.begin() as db:
+        db.get(SourceRegistration, source_id).is_active = False
+    with products() as db:
+        hidden = asyncio.run(answer_product("Complete details for SKU TEST-1", actor, db))
+    assert "ceramic cartridge" not in hidden.answer
+    assert hidden.sources == []
 
 
 def test_stock_lookup_reads_current_authorized_variant_values(products):

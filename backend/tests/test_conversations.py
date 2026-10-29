@@ -23,7 +23,7 @@ from app.main import app
 from app.schemas.ask import SourceCitation
 from app.schemas.chat import ChatResponse
 from app.services.conversations import (
-    ConversationConflict, inferred_product_handles, load_owned, purge_expired, save_turn,
+    ConversationConflict, TurnContext, inferred_product_handles, load_owned, purge_expired, save_turn,
 )
 
 
@@ -175,6 +175,26 @@ def test_revoked_source_redacts_historical_answer(runtime):
     assert "Private source answer" not in str(page)
 
 
+def test_web_citation_survives_history_refresh_without_company_registry(runtime):
+    client, sessions = runtime
+    citation = SourceCitation(
+        number=1, source_id="web:" + "a" * 64, title="Web: Python releases",
+        url="https://www.python.org/downloads/", fetched_at="2026-10-29T00:00:00+00:00", origin="web",
+    )
+    with patch("app.api.chat.answer_model_first", new_callable=AsyncMock,
+               return_value=_answer("Python release information [1]", sources=[citation])):
+        response = client.post("/api/v1/chat", headers=headers(), json={"message": "Latest Python release?"})
+    assert response.status_code == 200
+    identity = response.json()["conversation_id"]
+    page = client.get(f"/api/v1/conversations/{identity}", headers=headers()).json()
+    assert page["messages"][1]["sources"][0]["origin"] == "web"
+    assert page["messages"][1]["sources"][0]["url"] == "https://www.python.org/downloads/"
+    assert client.get(f"/api/v1/conversations/{identity}", headers=headers(2)).status_code == 404
+    with sessions() as db:
+        saved = db.scalar(select(ConversationMessage).where(ConversationMessage.role == "assistant"))
+        assert saved.source_ids == [] and len(saved.web_sources) == 1
+
+
 def test_hidden_product_redacts_historical_answer(runtime):
     client, sessions = runtime
     with sessions.begin() as db:
@@ -205,6 +225,19 @@ def test_corrupt_saved_handles_are_not_reused(runtime):
     with sessions() as db:
         context = load_owned(db, db.get(User, 1), identity)
         assert inferred_product_handles("Which of these is cheaper?", context) == []
+
+
+def test_this_product_carries_only_the_previous_product_handle():
+    context = TurnContext(
+        conversation=None, version=1,
+        recent=(
+            ConversationMessage(role="user", content="Show SKU TEST-1701"),
+            ConversationMessage(role="assistant", content="Catalog result", route="product",
+                                product_handles=["1689"]),
+        ),
+    )
+    assert inferred_product_handles("What category is this product?", context) == ["1689"]
+    assert inferred_product_handles("What is the return policy of this product?", context) == []
 
 
 def test_expired_conversation_is_inaccessible_and_purged(runtime):

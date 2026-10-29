@@ -11,7 +11,7 @@ from app.retrieval.rerank import STOP_WORDS, WORD
 
 
 COMPANY_OVERVIEW = re.compile(
-    r"\b(?:business|industry|sector|category|speciali[sz]\w*|sell|provid\w*|offer\w*)\b",
+    r"\b(?:business|industry|sector|category|speciali[sz]\w*|sell\w*|provid\w*|offer\w*)\b",
     re.I,
 )
 COMPANY_REFERENCE = re.compile(r"\b(?:sardars?|you|your|yours|we|our|ours)\b", re.I)

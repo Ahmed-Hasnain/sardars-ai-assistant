@@ -156,6 +156,13 @@ def test_natural_broad_product_browsing_uses_bounded_visible_catalog(catalog):
         assert not invoke(db, "Show products under 50").data.matches
 
 
+def test_options_is_not_a_required_catalog_term(catalog):
+    with catalog() as db:
+        result = invoke(db, "Product options under 10000")
+    assert result.ok and result.data.matches
+    assert all(float(item.price) < 10000 for item in result.data.matches)
+
+
 def test_catalog_categories_need_no_routing_word_list_and_keep_visibility(catalog):
     common = dict(source_file_name="test.csv", source_file_sha256="a" * 64,
                   source_row_kind="variant")

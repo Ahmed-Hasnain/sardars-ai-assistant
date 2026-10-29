@@ -17,6 +17,9 @@ class Observation:
     retrieval: list[dict] = field(default_factory=list)
     authorized_sources: list[dict] = field(default_factory=list)
     model_calls: list[dict] = field(default_factory=list)
+    # Bounded authorized excerpts make independent claim/citation review possible.
+    evidence: list[dict] = field(default_factory=list)
+    web_results: list[dict] = field(default_factory=list)
 
 
 class ObservedModel:
@@ -24,14 +27,14 @@ class ObservedModel:
         self.model = model
         self.observation = observation
 
-    async def chat(self, messages: list[ChatMessage]) -> ChatResult:
+    async def chat(self, messages: list[ChatMessage], *, output_limit: int | None = None) -> ChatResult:
         started = perf_counter()
-        row = {"message_count": len(messages),
+        row = {"message_count": len(messages), "output_limit": output_limit,
                "context_characters": sum(len(message["content"]) for message in messages),
                "prompt_tokens": None, "output_tokens": None}
         self.observation.model_calls.append(row)
         try:
-            result = await self.model.chat(messages)
+            result = await self.model.chat(messages, output_limit=output_limit)
             row.update(model=result.model, prompt_tokens=result.prompt_tokens,
                        output_tokens=result.output_tokens)
             return result
@@ -76,6 +79,11 @@ def observe(model: ChatModel) -> Iterator[Observation]:
             observation.tools.append({"name": call.name, "ok": result.ok,
                                       "error_code": None if result.ok else result.error.code,
                                       "total_ms": round((perf_counter() - started) * 1000, 1)})
+            if call.name == "search_web" and result.ok:
+                observation.web_results.extend({
+                    "url": hit.url, "title": hit.title, "snippet": hit.snippet,
+                    "observed_at": result.data.observed_at.isoformat(),
+                } for hit in result.data.hits)
             return result
         return execute
 
@@ -105,13 +113,26 @@ def observe(model: ChatModel) -> Iterator[Observation]:
             return points
         return authorize
 
+    def excerpt_wrapper(original):
+        async def excerpts(*args, **kwargs):
+            result = await original(*args, **kwargs)
+            observation.evidence.extend({
+                "source_id": item.source_id, "title": item.title, "url": item.url,
+                "text": item.text[:model_assistant.MAX_EXCERPT_CHARS],
+            } for item in result[:model_assistant.MAX_EXCERPTS])
+            return result
+        return excerpts
+
     with ExitStack() as stack:
         stack.enter_context(patch.object(chat, "chat_model", ObservedModel(model, observation)))
-        for module in (product_answer, product_discovery):
+        stack.enter_context(patch.object(model_assistant, "_authorized_excerpts",
+                                         excerpt_wrapper(model_assistant._authorized_excerpts)))
+        for module in (model_assistant, product_answer, product_discovery):
             stack.enter_context(patch.object(module, "execute_tool", tool_wrapper(module.execute_tool)))
         for module, name, authorize_name in (
             (model_assistant, "search_for_role", "select_authorized_points"),
             (company_answer, "search_for_role", "select_authorized_points"),
+            (product_answer, "fetch_product_points", "authorized_points"),
             (product_discovery, "fetch_product_points", "authorized_points"),
         ):
             stack.enter_context(patch.object(module, name, search_wrapper(getattr(module, name))))

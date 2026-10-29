@@ -37,7 +37,7 @@ class ModelError(RuntimeError):
 
 
 class ChatModel(Protocol):
-    async def chat(self, messages: list[ChatMessage]) -> ChatResult:
+    async def chat(self, messages: list[ChatMessage], *, output_limit: int | None = None) -> ChatResult:
         ...
 
     async def chat_with_tools(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ToolChatResult:

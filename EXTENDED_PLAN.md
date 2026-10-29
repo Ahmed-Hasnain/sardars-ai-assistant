@@ -1,7 +1,7 @@
 # Sardars AI Assistant — extended plan
 
-Last reviewed: 2026-10-22
-Status: active roadmap; E1–E6 historical checkpoints are complete on this laptop. A developer-requested model-first prototype follow-up is now in progress before optional E7. Its answer quality, citations and latency need a new current-flow evaluation.
+Last reviewed: 2026-10-29
+Status: active roadmap; E1–E7 and the developer-requested E6 model-first prototype follow-up are complete in their measured scopes on this laptop. E8 live internal acceptance is next. Human claim review and production readiness remain later work.
 Implementation evidence: `IMPLEMENTATION_STATUS.md`
 Original prototype roadmap and decisions: `PLAN.md`
 
@@ -107,20 +107,22 @@ The developer requested a more open prototype flow after the E6 application rout
 
 - [x] Send each normal information question to a local LLM. Retrieve and authorize a small initial RAG set first; empty or unavailable retrieval becomes empty context. Pure greetings skip needless retrieval but still reach the model. Offer a bounded model-selected follow-up search and read-only PostgreSQL product tools. Preserve application-enforced login, role/source checks, Pydantic tool validation, output bounds and database authority for SKU, price and stock.
 - [x] Record a first live latency and answer sample on uploaded data, compare the chosen 4B model with the already-installed 0.6B model for this interactive path, and keep the embedding model, collection and corpus unchanged. See [prototype report](docs/e6_model_first_checkpoint.md).
-- [ ] Rebuild the current-flow case set and evaluator expectations. Measure greeting, company overview, FAQ qualification, review sentiment, categories, address, product discovery, exact SKU/price/stock, absent evidence, citations, role revocation, injection and latency under the new routing. The old E4/E5/E6 pass counts are historical and must not be presented as current-flow scores.
-- [ ] Independently review a wider sample of generated company claims and citations, including the observed uncited/misqualified review answer. Decide whether the 0.6B response quality is sufficient for this prototype or whether a faster hardware/model path is needed. Do this before E7 or production claims.
+- [x] Rebuild the current-flow case set and evaluator expectations. Measure greeting, company overview, FAQ qualification, review sentiment, categories, address, product discovery, exact SKU/price/stock, absent evidence, citations, role revocation, injection and latency under the new routing. The old E4/E5/E6 pass counts are historical and must not be presented as current-flow scores.
+- [x] Separately audit a wider sample of company claims and citations against captured authorized excerpts, including the observed misqualified review answer. The bounded 0.6B path passed the prototype sample; independent human review and broader freeform quality remain E8/production backlog. See [current-flow exit](docs/e6_current_flow_exit.md).
 
-Exit remains open until the new flow has a measured acceptance report with no unsupported company or changing-fact assertions in the reviewed cases. A unit suite and a few live examples verify implementation, not broad answer quality.
+E6 follow-up exit, verified 2026-10-28: The current-flow replay passed **14/14**, with **8/8** expected citation/source hits, **2/2** exact PostgreSQL fact checks, **2/2** stock checks and a stable source/product fingerprint; median/p95 latency was **3.82/26.39 seconds**. A separate five-case open-ended claim sample passed **5/5** after correcting unsupported Lahore, competitor, brand, installation and history answers; its median/p95 was **4.76/9.60 seconds**. An agent-performed citation audit found no unsupported Sardars or changing-fact assertion in the reviewed final cases. The full backend suite passed **679, four skipped**, and the rebuilt local API returned readiness 200 and anonymous `/ask` 401. This is a bounded prototype exit, not independent human sign-off or broad freeform grounding certification. See [current-flow exit](docs/e6_current_flow_exit.md).
 
 ## E7 — Bounded internet search, if needed
 
 Goal: add external information only for questions that benefit from it, with distinct provenance.
 
-- [ ] Decide whether the use case needs internet search; compare a self-hosted search service with an approved provider, including privacy/network implications.
-- [ ] If adopted, allowlist the search tool, cap queries/results/time, apply domain safety and safe errors, and define citation provenance and cache expiry. Treat result text as untrusted.
-- [ ] Test injection, authorization, unavailable results and citations. Never use web results alone to assert current Sardars price, stock, policy or other controlled facts.
+- [x] Decide whether the use case needs internet search; compare a self-hosted search service with an approved provider, including privacy/network implications.
+- [x] If adopted, allowlist the search tool, cap queries/results/time, apply domain safety and safe errors, and define citation provenance and cache expiry. Treat result text as untrusted.
+- [x] Test injection, authorization, unavailable results and citations. Never use web results alone to assert current Sardars price, stock, policy or other controlled facts.
 
 Exit: either a tested bounded search path with clear source labels or a documented decision to defer it.
+
+E7 exit, verified 2026-10-29: The eight-case live replay passed **8/8** declared checks; all three eligible current-external questions triggered model-selected, successful web searches and returned distinct cited web evidence. Five company/catalog/general/unsafe controls made no web call. The full backend suite passed **702, four skipped**; frontend tests/build, additive migration/no-drift, local readiness and anonymous access checks passed. The eight-case median/p95 was **14.81/29.25 seconds**, and the web-turn median/p95 was **27.77/29.25 seconds**. Search runs through local SearXNG but queries still reach upstream engines. Release-answer corrections fixed observed beta promotion and wrong-citation failures; freeform small-model quality and search latency remain E8 review items. See [E7 checkpoint](docs/e7_search_checkpoint.md).
 
 ## E8 — Live internal acceptance
 

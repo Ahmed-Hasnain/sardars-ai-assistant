@@ -29,6 +29,26 @@ def test_chat_caps_predicted_tokens_and_accepts_small_reply(monkeypatch):
     assert seen[0].read().decode().count('"keep_alive":300') == 1
 
 
+def test_checked_answer_can_request_a_smaller_generation_bound(monkeypatch):
+    seen = []
+    real_client = httpx.AsyncClient
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"message": {"content": "READY"}, "model": "test"})
+
+    monkeypatch.setattr("app.llm.ollama.httpx.AsyncClient", lambda **kw: real_client(
+        transport=httpx.MockTransport(handler), timeout=kw["timeout"],
+    ))
+    model = OllamaChatModel(Settings(), output_limit=160)
+    result = asyncio.run(model.chat([{"role": "user", "content": "Question"}], output_limit=12))
+    assert result.text == "READY"
+    assert '"num_predict":12' in seen[0].read().decode()
+    with pytest.raises(ValueError, match="configured bound"):
+        asyncio.run(model.chat([{"role": "user", "content": "Question"}], output_limit=161))
+    assert len(seen) == 1
+
+
 def test_tool_chat_uses_chat_residency_not_ingestion_setting(monkeypatch):
     requests = []
     real_client = httpx.AsyncClient

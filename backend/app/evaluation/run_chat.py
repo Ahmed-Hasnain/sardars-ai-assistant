@@ -8,6 +8,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 import math
+import os
 from pathlib import Path
 import re
 from statistics import median
@@ -37,7 +38,7 @@ from app.retrieval.seed_config import COLLECTION, MODEL
 from app.schemas.chat import ChatRequest, ChatResponse
 
 CASES_PATH = Path(__file__).with_name("chat_cases.json")
-ToolName = Literal["get_product_details", "search_products", "get_source_status"]
+ToolName = Literal["get_product_details", "search_products", "get_source_status", "list_product_categories", "search_web"]
 
 
 class ChatCase(Case):
@@ -51,6 +52,7 @@ class ChatCase(Case):
     stock_filter: Literal["positive", "zero"] | None = None
     min_products: int = Field(default=0, ge=0, le=3)
     min_citations: int = Field(default=0, ge=0, le=3)
+    max_citations: int | None = Field(default=None, ge=0, le=3)
     price_under: int | None = Field(default=None, gt=0)
     abstain: bool = False
 
@@ -183,6 +185,7 @@ def stock_facts(case: ChatCase, response: ChatResponse, db: Session) -> bool | N
 
 def check_response(case: ChatCase, response: ChatResponse, observation: Observation, db: Session) -> dict:
     permitted = {(row["source_id"], row["url"]) for row in observation.authorized_sources}
+    web_urls = {row["url"] for row in observation.web_results}
     markers = {int(value) for value in re.findall(r"\[(\d+)\]", response.answer)}
     checks = {
         "routing": response.route == case.expected_route,
@@ -193,7 +196,12 @@ def check_response(case: ChatCase, response: ChatResponse, observation: Observat
         "retrieval": (case.expected_source in {row["url"] for row in observation.authorized_sources}
                       if case.expected_source else None),
         "citations": (markers == {source.number for source in response.sources}
-                      and all((source.source_id, source.url) in permitted for source in response.sources)),
+                      and all(((source.source_id, source.url) in permitted if source.origin == "company" else
+                               source.url in web_urls and source.source_id.startswith("web:"))
+                              for source in response.sources)),
+        "web_provenance": (all(source.origin == "web" for source in response.sources)
+                           if "search_web" in case.expected_tools else None),
+        "max_citations": len(response.sources) <= case.max_citations if case.max_citations is not None else None,
         "expected_source": (case.expected_source in {source.url for source in response.sources}
                             if case.expected_source else None),
         "answer": (all(phrase.casefold() in response.answer.casefold() for phrase in case.answer_contains)
@@ -272,6 +280,10 @@ def summarize(rows: list[dict]) -> dict:
                                             if call.get("output_tokens") is not None),
         "model_calls_without_token_counts": sum(call.get("prompt_tokens") is None or call.get("output_tokens") is None
                                                for call in calls),
+        "web_search_calls": sum(row["name"] == "search_web" for case in live for row in case["observation"].get("tools", [])),
+        "web_search_successes": sum(row["name"] == "search_web" and row["ok"] for case in live
+                                    for row in case["observation"].get("tools", [])),
+        "model_requested_web_search": sum("search_web" in call.get("requested_tools", []) for call in calls),
         "max_model_context_characters": max((call["context_characters"] for call in calls), default=None),
     }
 
@@ -301,36 +313,73 @@ def data_fingerprint() -> str:
     return digest.hexdigest()
 
 
+def git_state() -> tuple[str, bool | None]:
+    """Container images may omit Git; accept explicit build-context metadata."""
+    try:
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+        return revision, dirty
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return os.getenv("E6_GIT_REVISION", "unknown"), None
+
+
 async def run(args: argparse.Namespace) -> None:
     cases = load_cases(args.cases)
+    selected = getattr(args, "only", None)
+    if selected:
+        ids = set(selected.split(","))
+        if not ids or ids - {case.id for case in cases}:
+            raise ValueError("Unknown or empty selected case ID")
+        cases = [case for case in cases if case.id in ids]
     settings = Settings()
+    revision, dirty = git_state()
     # Reserve the report before expensive work; never overwrite earlier evidence.
     args.report.parent.mkdir(parents=True, exist_ok=True)
     with args.report.open("x", encoding="utf-8") as stream:
         metadata = {
             "schema_version": 1, "protocol_version": 3, "started_at": datetime.now(timezone.utc).isoformat(),
+            "complete": False, "selected_case_ids": [case.id for case in cases],
             "case_sha256": sha256(args.cases.read_bytes()).hexdigest(),
-            "git_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-            "git_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()),
+            "git_revision": revision,
+            "git_dirty": dirty,
             "evaluator_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
-            "chat_model": settings.ollama_model, "embedding_model": MODEL, "collection": COLLECTION,
+            "chat_model": settings.prototype_chat_model if args.current_model_first else settings.ollama_model,
+            "embedding_model": MODEL, "collection": COLLECTION,
             "answer_timeout_seconds": settings.answer_timeout_seconds,
             "data_fingerprint_before": data_fingerprint(),
             "scope": "Read-only answer services; trusted local role; excludes HTTP auth, history, SSE and UI",
             "thresholds": "Every declared case check must pass; quality/latency business targets remain unset",
         }
-        model = OllamaChatModel(settings)
+        model = (OllamaChatModel(settings.model_copy(update={"ollama_model": settings.prototype_chat_model}),
+                                 output_limit=160, tool_output_limit=96)
+                 if args.current_model_first else OllamaChatModel(settings))
         rows = []
+
+        def checkpoint() -> None:
+            stream.seek(0)
+            snapshot_summary = summarize(rows)
+            if metadata["complete"]:
+                snapshot_summary["data_stable_during_run"] = (
+                    metadata["data_fingerprint_before"] == metadata["data_fingerprint_after"]
+                )
+            json.dump({"metadata": metadata, "case_definitions": [case.model_dump() for case in cases],
+                       "summary": snapshot_summary, "cases": rows}, stream, indent=2)
+            stream.write("\n")
+            stream.truncate()
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        checkpoint()
         for case in cases:
             row = await evaluate(case, model)
             rows.append(row)
             print(f"{'PASS' if row['passed'] else 'FAIL'} [{row['mode']}] {case.id}: {row['total_ms']:.1f} ms {row['failures']}", flush=True)
+            checkpoint()
         summary = summarize(rows)
         metadata["data_fingerprint_after"] = data_fingerprint()
         summary["data_stable_during_run"] = metadata["data_fingerprint_before"] == metadata["data_fingerprint_after"]
-        json.dump({"metadata": metadata, "case_definitions": [case.model_dump() for case in cases],
-                   "summary": summary, "cases": rows}, stream, indent=2)
-        stream.write("\n")
+        metadata["complete"] = True
+        checkpoint()
     print(json.dumps(summary, indent=2))
     if summary["passed"] != summary["cases"] or not summary["data_stable_during_run"]:
         raise SystemExit(1)
@@ -340,6 +389,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, default=CASES_PATH)
     parser.add_argument("--report", type=Path, required=True, help="New local JSON report; never overwritten")
+    parser.add_argument("--current-model-first", action="store_true",
+                        help="Use the prototype chat model and generation bounds used by /chat")
+    parser.add_argument("--only", help="Comma-separated case IDs for a diagnostic subset")
     args = parser.parse_args()
     try:
         asyncio.run(run(args))

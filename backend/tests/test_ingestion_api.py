@@ -124,7 +124,7 @@ def test_admin_only_content_never_reaches_staff_answers_or_metadata(runtime):
     assert client.get("/api/v1/ingestion/sources", headers=headers["staff"]).json() == []
     assert client.get("/api/v1/ingestion/jobs/" + result["job_id"], headers=headers["staff"]).status_code == 404
     assert client.delete("/api/v1/ingestion/sources/" + identity, headers=headers["staff"]).status_code == 404
-    async def answer_from_context(messages):
+    async def answer_from_context(messages, *, output_limit=None):
         has_brand = "Vaultbrand" in messages[-2]["content"]
         return ChatResult(
             "Sardars mentions Vaultbrand. [1]" if has_brand else "I cannot verify that from available sources.",

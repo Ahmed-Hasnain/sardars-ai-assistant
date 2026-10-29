@@ -66,6 +66,8 @@ class ProductDetails(StrictModel):
     handle: str = Field(max_length=200)
     title: str | None = Field(max_length=500)
     vendor: str | None = Field(max_length=200)
+    category: str | None = Field(default=None, max_length=200)
+    product_type: str | None = Field(default=None, max_length=200)
     source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_exported_at: AwareDatetime | None
     imported_at: AwareDatetime
@@ -122,6 +124,22 @@ class ProductCategoryArguments(StrictModel):
     pass
 
 
+class WebSearchArguments(StrictModel):
+    query: str = Field(min_length=3, max_length=200)
+
+
+class WebSearchHit(StrictModel):
+    title: str = Field(max_length=160)
+    url: str = Field(max_length=2048)
+    snippet: str = Field(max_length=500)
+
+
+class WebSearchResults(StrictModel):
+    authority: Literal["external_web_search"] = "external_web_search"
+    observed_at: AwareDatetime
+    hits: list[WebSearchHit] = Field(max_length=3)
+
+
 class ProductCategoryResults(StrictModel):
     authority: Literal["developer_authorized_products_table"] = "developer_authorized_products_table"
     observed_at: AwareDatetime
@@ -134,7 +152,7 @@ class ToolError(StrictModel):
     code: Literal[
         "unknown_tool", "permission_denied", "invalid_arguments", "source_not_found",
         "tool_timeout", "tool_unavailable", "invalid_result",
-        "product_not_found", "ambiguous_sku", "too_many_variants",
+        "product_not_found", "ambiguous_sku", "too_many_variants", "query_not_allowed",
     ]
     message: str = Field(max_length=200)
 
@@ -142,7 +160,7 @@ class ToolError(StrictModel):
 class ToolSuccess(StrictModel):
     tool: str = Field(max_length=64)
     ok: Literal[True] = True
-    data: SourceStatus | ProductDetails | ProductCandidates | ProductSearchResults | ProductCategoryResults
+    data: SourceStatus | ProductDetails | ProductCandidates | ProductSearchResults | ProductCategoryResults | WebSearchResults
 
 
 class ToolFailure(StrictModel):
