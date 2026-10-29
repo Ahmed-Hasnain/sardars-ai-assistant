@@ -1,7 +1,7 @@
 # Sardars AI Assistant — product and development plan
 
-Last reviewed: 2026-10-19
-Status: original English internal-prototype roadmap complete through Phase 12; unfinished Phase 13 and deferred follow-ups transferred to `EXTENDED_PLAN.md`
+Last reviewed: 2026-10-29
+Status: closed historical roadmap. The agreed English internal-prototype implementation is complete through Phase 12; Phase 13 deployment was not implemented. The extended implementation cycle is also closed in its measured scope; see `EXTENDED_PLAN.md`.
 Implementation status: see `IMPLEMENTATION_STATUS.md`
 Repository: `sardars-ai-assistant`
 
@@ -25,7 +25,7 @@ Engineering standards for every phase: use type hints, Pydantic v2 schemas, clea
 
 ## Implementation tracking
 
-`IMPLEMENTATION_STATUS.md` is the record of current behavior, phase status, completed major features, and verification evidence. This file records the original roadmap and acceptance criteria through Phase 12. Current work follows `EXTENDED_PLAN.md`, which carries the uncompleted deployment and follow-up items. If status text here and the implementation status file disagree, inspect the code and use `IMPLEMENTATION_STATUS.md` as the current-status record.
+`IMPLEMENTATION_STATUS.md` is the record of current behavior, phase status, completed major features, and verification evidence. This file preserves the original roadmap and acceptance criteria through Phase 12. `EXTENDED_PLAN.md` records the now-closed follow-up cycle and its explicitly deferred items. New features or acceptance work will use a new plan rather than changing historical checkpoints. If status text here and the implementation status file disagree, inspect the code and use `IMPLEMENTATION_STATUS.md` as the current-status record.
 
 ## Decisions to settle before they affect implementation
 
@@ -107,14 +107,16 @@ Goal: turn the broad vision into one testable first user journey.
 
 - [x] Record the product vision, architectural boundaries, and phased approach.
 - [x] Choose the V1 audience: admins and internal staff only; defer public customer access.
-- [ ] Define admin/staff roles and which internal sources each role may access.
-- [ ] Collect representative user questions, including questions whose correct answer is “not verified.”
+- [x] Define admin/staff roles and application-enforced source visibility for the internal prototype.
+- [x] Collect representative questions, including cases whose correct answer is “not verified,” in the recorded evaluation suites.
 - [x] Authorize the supplied public sitemap/site links and company profile for the internal retrieval prototype; use source-level approval for authorized admin/staff uploads and registered URLs.
-- [ ] Identify owners and authoritative sources for product, price, and stock data.
-- [ ] Decide required languages and inspect local hardware.
-- [ ] Define initial acceptance measures for correctness, groundedness, and acceptable response time after a baseline is measured.
+- [x] Choose PostgreSQL as the authorized source for internal SKU, price and stock snapshots; external business-system ownership and synchronization remain deferred.
+- [x] Scope the prototype to English and inspect the available local hardware; other languages remain deferred.
+- [x] Record provisional engineering checks for correctness, groundedness and latency after a baseline; a business response-time target remains deferred.
 
-Exit: the first AI use case and its authoritative sources are written down. Phase 1 can continue while these decisions are pending.
+Exit: the first AI use case and its authoritative sources are written down. Phase 1 originally proceeded while some decisions were pending.
+
+Phase 0 is closed for the agreed English internal prototype. The deferred external-system, language and business-target decisions above are not implied to be settled by this closure.
 
 ## Phase 1 — Foundation
 
@@ -326,7 +328,7 @@ Phase 12 completed for the English internal prototype on 2026-10-18. Against the
 
 ## Phase 13 — Transferred, not completed
 
-Production deployment is not currently planned. Its local containerization portion and later production-readiness requirements are now sequenced in `EXTENDED_PLAN.md` (E1 and E9). The original roadmap is complete **for its English internal-prototype scope through Phase 12 only**; this transfer is not a production-readiness claim.
+Production deployment is not currently planned. Its local containerization portion was verified in E1; production-readiness requirements were recorded as E9 and remain unimplemented. The original roadmap is complete **for its English internal-prototype scope through Phase 12 only**; closing this plan does not certify production readiness.
 
 ## API, security, and observability conventions
 
@@ -343,7 +345,7 @@ Capture structured logs/metrics for request and conversation IDs, model/embeddin
 - Add multi-company configuration after Sardars has proven the shared boundaries; do not hardcode core infrastructure to one brand, but do not build tenancy before it is needed.
 - Add Redis, rerankers, advanced orchestration, S3, or broader deployment infrastructure only when evidence justifies them.
 
-## Deferred follow-up backlog — transferred, not completed
+## Closure and deferred work
 
-The original backlog is now sequenced in `EXTENDED_PLAN.md`: ingestion runner (E3), fresh-account ingestion (E4), full-corpus retrieval (E5), model-assisted tool choice (E6), internet search (E7), and live end-to-end acceptance (E8). No data was cleared and none of these items is marked complete by the roadmap transfer.
+The extended cycle subsequently verified E1–E7, including the developer-requested model-first E6 follow-up, in their stated internal-prototype scopes. On 2026-10-29 the project owner closed the current implementation cycle. E8 live internal acceptance, independent human sign-off, self-registration/approval, and E9 production readiness were not completed; they are deferred until a new plan is opened. Closing the roadmap changes no data or verification result.
 
