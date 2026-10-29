@@ -2,7 +2,7 @@
 
 from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import SourceRegistration
@@ -28,6 +28,9 @@ def authorized_points(db: Session, role: str, points: list[dict]) -> list[dict]:
     }
     if not ids:
         return []
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SET LOCAL statement_timeout = '2s'"))
+        db.execute(text("SET LOCAL lock_timeout = '1s'"))
     registrations = {
         source.source_id: source
         for source in db.scalars(
@@ -48,6 +51,8 @@ def authorized_points(db: Session, role: str, points: list[dict]) -> list[dict]:
         if (
             source is None
             or not source.is_active
+            or source.index_status != "ready"
+            or (source.index_generation is not None and source.index_generation != payload.get("index_generation"))
             or source.visibility not in allowed
             or source.visibility != payload.get("visibility")
             or source.url != url

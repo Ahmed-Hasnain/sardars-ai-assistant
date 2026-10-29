@@ -1,0 +1,223 @@
+[
+  {
+    "id": "faq_alias",
+    "question": "Is Sardar and Co the same business as Sardars?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "precise registered legal name",
+      "registration or invoice"
+    ]
+  },
+  {
+    "id": "faq_alias_admin",
+    "question": "Is Sardar and Co the same business as Sardars?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "precise registered legal name"
+    ],
+    "role": "admin"
+  },
+  {
+    "id": "faq_manufacture",
+    "question": "Does Sardars manufacture everything it sells?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "sourcing and supplying",
+      "Do not assume"
+    ]
+  },
+  {
+    "id": "faq_history",
+    "question": "How long has Sardars been in business?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "Public records differ",
+      "1974",
+      "2008"
+    ]
+  },
+  {
+    "id": "faq_europe",
+    "question": "Are all Sardars products made in Europe?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "Do not assume",
+      "manufacturing location can differ"
+    ]
+  },
+  {
+    "id": "faq_professionals",
+    "question": "Does Sardars serve both homeowners and professionals?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "architects",
+      "Trade terms are not automatically guaranteed"
+    ]
+  },
+  {
+    "id": "faq_bathroom",
+    "question": "Can I buy a complete bathroom from Sardars?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "checking dimensions",
+      "compatibility"
+    ]
+  },
+  {
+    "id": "faq_slogan",
+    "question": "What does Buy Direct Buy Original mean?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "published message",
+      "does not by itself prove"
+    ]
+  },
+  {
+    "id": "alias_paraphrase",
+    "question": "Do Sardars and Sardar and Co refer to the same business?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "registration or invoice"
+    ]
+  },
+  {
+    "id": "history_paraphrase",
+    "question": "How old is Sardars?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/e9bef6e7-66e9-4d79-822e-8c293f14ffcb",
+    "answer_contains": [
+      "Public sources differ",
+      "milestones"
+    ]
+  },
+  {
+    "id": "social_craft",
+    "question": "What storytelling does Sardars Punkh craftsmanship collaboration use?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/6563ab01-acf7-421c-aa4c-57db4e3b365f",
+    "answer_contains": [
+      "wood-to-craftsmanship"
+    ]
+  },
+  {
+    "id": "social_auth",
+    "question": "Did the Sardars social media research obtain an authenticated Instagram account export?",
+    "category": "uploaded_sources",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/6563ab01-acf7-421c-aa4c-57db4e3b365f",
+    "answer_contains": [
+      "Do not report an authenticated"
+    ]
+  },
+  {
+    "id": "overview",
+    "question": "Tell me about Sardars",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": "https://sardarandco.com/pages/about-us",
+    "answer_contains": [],
+    "answer_contains_any": [
+      "sanitary",
+      "bathroom"
+    ]
+  },
+  {
+    "id": "brands",
+    "question": "Which brands does Sardars mention?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": "https://sardarandco.com/pages/about-us",
+    "answer_contains": [
+      "Bongio",
+      "Grohe"
+    ]
+  },
+  {
+    "id": "storage",
+    "question": "What bathroom storage product does Sardars describe?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": "https://sardarandco.com/products/shower-niche-pakistan",
+    "answer_contains": [
+      "Shower Niche"
+    ]
+  },
+  {
+    "id": "current_hours",
+    "question": "What are Sardars current opening hours?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": null,
+    "answer_contains": [],
+    "abstain": true
+  },
+  {
+    "id": "current_rating",
+    "question": "What is Sardars current Google rating?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": "/api/v1/ingestion/files/9405aae1-8e4e-4578-bf84-463eaf4d3407",
+    "answer_contains": [
+      "does not verify a current value"
+    ],
+    "answer_not_contains": [
+      "4.8 stars"
+    ]
+  },
+  {
+    "id": "policy",
+    "question": "What is Sardars return policy?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": null,
+    "answer_contains": [],
+    "abstain": true
+  },
+  {
+    "id": "delivery",
+    "question": "Can Sardars guarantee delivery tomorrow?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": null,
+    "answer_contains": [],
+    "abstain": true
+  },
+  {
+    "id": "charity",
+    "question": "Does Sardars run a charity hospital?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": null,
+    "answer_contains": [],
+    "abstain": true
+  },
+  {
+    "id": "ceo",
+    "question": "Who is the CEO of Sardars?",
+    "category": "company",
+    "expected_route": "company",
+    "expected_source": null,
+    "answer_contains": [],
+    "abstain": true
+  }
+]

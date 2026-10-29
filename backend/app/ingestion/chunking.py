@@ -1,18 +1,85 @@
 import json
 from pathlib import Path
+import re
 from uuid import NAMESPACE_URL, uuid5
 
 MAX_WORDS = 100
 OVERLAP_WORDS = 15
+MAX_FAQ_WORDS = 120
+FAQ_BLOCK = re.compile(r"^[A-Z][A-Z0-9_-]{2,48}-FAQ-\d{3,5}\s*\|\s*.+\?\s*\nAnswer:\s*", re.I)
 
 
-def chunk_record(record: dict) -> list[dict]:
-    words = record["text"].split()
+def _sliding_groups(words: list[str]) -> list[list[str]]:
+    groups = []
+    for start in range(0, len(words), MAX_WORDS - OVERLAP_WORDS):
+        groups.append(words[start:start + MAX_WORDS])
+        if start + MAX_WORDS >= len(words):
+            break
+    return groups
+
+
+def _word_groups(text: str) -> list[list[str]]:
+    """Keep a short, clearly labelled FAQ question with its answer."""
+    blocks = re.split(r"\n\s*\n", text.strip())
+    if not any(FAQ_BLOCK.match(block) for block in blocks):
+        return _sliding_groups(text.split())
+
+    groups: list[list[str]] = []
+    ordinary: list[str] = []
+
+    def flush_ordinary() -> None:
+        if not ordinary:
+            return
+        groups.extend(_sliding_groups(ordinary))
+        ordinary.clear()
+
+    for block in blocks:
+        words = block.split()
+        if FAQ_BLOCK.match(block) and len(words) <= MAX_FAQ_WORDS:
+            flush_ordinary()
+            groups.append(words)
+        else:
+            ordinary.extend(words)
+    flush_ordinary()
+    return groups
+
+
+def _structure_groups(text: str) -> list[list[str]]:
+    """Shadow policy: preserve short sections; overlap only within long sections.
+
+    FAQ pairs retain their existing, separately bounded treatment. This policy
+    is deliberately opt-in until the saved-corpus comparison justifies reindexing.
+    """
+    blocks = [block for block in re.split(r"\n\s*\n", text.strip()) if block.strip()]
+    groups: list[list[str]] = []
+    ordinary: list[str] = []
+
+    def flush() -> None:
+        if ordinary:
+            groups.append(ordinary.copy())
+            ordinary.clear()
+
+    for block in blocks:
+        words = block.split()
+        if FAQ_BLOCK.match(block) and len(words) <= MAX_FAQ_WORDS:
+            flush()
+            groups.append(words)
+            continue
+        if len(words) > MAX_WORDS:
+            flush()
+            groups.extend(_sliding_groups(words))
+            continue
+        if ordinary and len(ordinary) + len(words) > MAX_WORDS:
+            flush()
+        ordinary.extend(words)
+    flush()
+    return groups
+
+
+def chunk_record(record: dict, *, structure_aware: bool = False) -> list[dict]:
     chunks = []
-    step = MAX_WORDS - OVERLAP_WORDS
-
-    for index, start in enumerate(range(0, len(words), step)):
-        chunk_words = words[start : start + MAX_WORDS]
+    groups = _structure_groups(record["text"]) if structure_aware else _word_groups(record["text"])
+    for index, chunk_words in enumerate(groups):
         chunk = {
             "id": str(uuid5(NAMESPACE_URL, f"{record['source_id']}:{index}")),
             "source_id": record["source_id"],
@@ -26,10 +93,9 @@ def chunk_record(record: dict) -> list[dict]:
             "chunk_index": index,
             "text": " ".join(chunk_words),
         }
+        if record.get("derivation") is not None:
+            chunk["derivation"] = record["derivation"]
         chunks.append(chunk)
-
-        if start + MAX_WORDS >= len(words):
-            break
 
     return chunks
 

@@ -1,0 +1,154 @@
+"""Reliable, application-selected product tool path for staff chat."""
+
+import asyncio
+import re
+
+import httpx
+from sqlalchemy.exc import SQLAlchemyError
+
+from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
+
+from app.db.models import User
+from app.rag.text_safety import contains_prompt_instruction
+from app.rag.claim_safety import unsafe_catalog_display
+from app.retrieval.authorization import authorized_points
+from app.retrieval.search_seed import fetch_product_points
+from app.schemas.chat import ChatResponse, ProductSource
+from app.services.product_discovery import _description
+from app.services.product_search import PRODUCT_URL
+from app.tools.registry import execute_tool
+from app.tools.schemas import ProductCandidates, ProductDetails, ToolInvocation, ToolSuccess
+
+STOCK_INTENT = re.compile(r"\b(?:stock|inventory|availability|available|in.stock|units left|on hand)\b", re.I)
+STOCK_PROMISE = re.compile(r"\b(?:guarantee|reserve|promise|definitely)\b", re.I)
+PRODUCT_INTENT = re.compile(r"\b(?:sku|price|prices|pricing|variant|variants|product details|product handle|cost|how much|stock|inventory|availability|available)\b", re.I)
+NO_PRODUCT = "I couldn't find a matching product in the current database. Provide a SKU, product handle, or more of the product name."
+FULL_DETAILS = re.compile(r"\b(?:complete|full|description|describe|more information)\b|about this product", re.I)
+CATEGORY_FIELD = re.compile(r"\b(?:category|type)\b", re.I)
+
+
+def _render_product(data: ProductDetails) -> str:
+    lines = [f"{data.title or data.handle} (handle: {data.handle})"]
+    if data.vendor:
+        lines.append(f"Vendor: {data.vendor}")
+    if data.category:
+        lines.append(f"Catalog category: {data.category}")
+    if data.product_type and data.product_type.casefold() != "simple":
+        lines.append(f"Catalog type: {data.product_type}")
+    lines.append("Prices, SKUs and variant stock quantities in the Sardars product database:")
+    for variant in data.variants:
+        options = ", ".join(
+            f"{name}: {value}" for name, value in (
+                (variant.option1_name, variant.option1_value),
+                (variant.option2_name, variant.option2_value),
+                (variant.option3_name, variant.option3_value),
+            ) if name and value
+        )
+        suffix = f" ({options})" if options else ""
+        stock = (f"database stock {variant.stock_quantity} units"
+                 if variant.stock_quantity is not None else "database stock not recorded")
+        lines.append(f"SKU {variant.sku or 'unknown'}{suffix}: price {variant.price} (currency not recorded); {stock}")
+        if variant.row_kind == "image_only":
+            lines.append("This SKU is on an image-only CSV row, not a product variant.")
+    lines.append("Values were read from PostgreSQL at request time. Stock can change after this read; reservations and external Shopify/ERP sync are unverified.")
+    return "\n".join(lines)
+
+
+def _render_candidates(data: ProductCandidates) -> str:
+    lines = ["Several products match. Please provide a SKU or handle to choose one:"]
+    for match in data.matches:
+        lines.append(f"- {match.title or match.handle} (handle: {match.handle})")
+    if data.more_matches:
+        lines.append("More matches exist; please narrow the product name.")
+    return "\n".join(lines)
+
+
+async def answer_product(
+    question: str, user: User, db: Session, *, identifier: str | None = None,
+) -> ChatResponse:
+    # Price/SKU questions are routed here by application code. A small model's
+    # decision to emit a tool call is not needed for exact database facts.
+    call = ToolInvocation(name="get_product_details", arguments={
+        "identifier": identifier,
+    } if identifier else {"question": question})
+    result = await run_in_threadpool(execute_tool, call, db, user)
+    if not isinstance(result, ToolSuccess):
+        if result.error.code == "tool_timeout":
+            answer = "The product database lookup timed out. Please try again."
+        elif result.error.code in {"tool_unavailable", "invalid_result"}:
+            answer = "The product database is unavailable right now."
+        elif result.error.code == "ambiguous_sku":
+            answer = "Several SKUs match that question. Please ask about one SKU at a time."
+        elif result.error.code == "too_many_variants":
+            answer = "This product has too many variants for one answer. Please ask about a specific SKU."
+        else:
+            answer = ("I can't guarantee stock availability. Provide a SKU, product handle, or clearer product name to check the current database quantity."
+                      if STOCK_INTENT.search(question) and STOCK_PROMISE.search(question) else NO_PRODUCT)
+        return ChatResponse(answer=answer, route="product", model=None)
+    if isinstance(result.data, ProductCandidates):
+        if any(contains_prompt_instruction(item.title or "") or unsafe_catalog_display(item.title or "")
+               for item in result.data.matches):
+            return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
+        return ChatResponse(answer=_render_candidates(result.data), route="product", model=None,
+                            company_data_verified=True)
+    if not isinstance(result.data, ProductDetails):
+        return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
+    data = result.data
+    display_fields = [data.title or "", data.vendor or "", data.category or "",
+                      data.product_type or "", data.handle]
+    for variant in data.variants:
+        display_fields.extend(value or "" for value in (
+            variant.sku, variant.option1_name, variant.option1_value,
+            variant.option2_name, variant.option2_value,
+            variant.option3_name, variant.option3_value,
+        ))
+    if (any(contains_prompt_instruction(value) or unsafe_catalog_display(value)
+            for value in display_fields)
+        or any(not re.fullmatch(r"\d+(?:\.\d+)?", variant.price)
+               or (variant.stock_quantity is not None and variant.stock_quantity < 0)
+               for variant in data.variants)):
+        return ChatResponse(answer="Product lookup unavailable.", route="product", model=None)
+    source = ProductSource(
+        source_file_sha256=data.source_file_sha256,
+        database_observed_at=data.observed_at,
+        source_exported_at=data.source_exported_at,
+        imported_at=data.imported_at,
+        currency=data.currency,
+        current_stock_verified=data.inventory_verified,
+    )
+    category_only = bool(CATEGORY_FIELD.search(question) and not PRODUCT_INTENT.search(question)
+                         and not STOCK_INTENT.search(question))
+    if category_only:
+        label = data.category or "not recorded"
+        answer = f"{data.title or data.handle} (handle: {data.handle}) has catalog category: {label}."
+        if data.product_type and data.product_type.casefold() != "simple":
+            answer += f" Catalog type: {data.product_type}."
+    else:
+        answer = _render_product(data)
+    citations = []
+    if FULL_DETAILS.search(question):
+        url = PRODUCT_URL + data.handle
+        try:
+            points = await asyncio.to_thread(fetch_product_points, [url], user.role)
+            points = authorized_points(db, user.role, points)
+            specifications = {
+                name: value for variant in data.variants for name, value in (
+                    (variant.option1_name, variant.option1_value),
+                    (variant.option2_name, variant.option2_value),
+                    (variant.option3_name, variant.option3_value),
+                ) if name and value
+            }
+            description = _description(points, url, specifications)
+        except (httpx.HTTPError, SQLAlchemyError, ValueError, KeyError, TypeError):
+            description = None
+        if description:
+            sentence, citation = description
+            citation.number = 1
+            citations = [citation]
+            answer += f"\nRegistered product-page description: {sentence} [1]"
+        else:
+            answer += "\nNo registered product-page description was verified for this catalog item."
+    return ChatResponse(answer=answer, route="product", model=None,
+                        company_data_verified=True, product_source=source,
+                        product_handles=[data.handle], sources=citations)
